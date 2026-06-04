@@ -2,12 +2,18 @@ package config
 
 var defaultConfig = Config{
 	Observability: Observability{
-		Logging: Logging{
+		Logger: Logger{
 			Level: "info",
 		},
 	},
-	Persistence: Persistence{
-		Path: "./data",
+
+	Storage: Storage{
+		Persist: true,
+		Pebble: Pebble{
+			DisableWAL:       false,
+			DataPath:         "./data",
+			CacheSizeMB:      16,
+			InMemTableSizeMB: 64,
+		},
 	},
-	RabbitMQ: nil,
 }

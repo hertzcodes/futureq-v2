@@ -6,16 +6,35 @@ import (
 	"strings"
 
 	"github.com/spf13/viper"
-	"gopkg.in/yaml.v3"
+	"gopkg.in/yaml.v2"
 )
 
 type Config struct {
 	Observability Observability `mapstructure:"observability" yaml:"observability"`
-	Persistence   Persistence   `mapstructure:"persistence" yaml:"persistence"`
-	RabbitMQ      *RabbitMQ     `mapstructure:"rabbitmq" yaml:"rabbitmq"`
+	Storage       Storage       `mapstructure:"storage" yaml:"storage"`
 }
 
-func PrepareConfig(path *string) (*Config, error) {
+type Observability struct {
+	Logger Logger `mapstructure:"logger" yaml:"logger"`
+}
+
+type Logger struct {
+	Level string `mapstructure:"level" yaml:"level"`
+}
+
+type Storage struct {
+	Persist bool   `mapstructure:"persist" yaml:"persist"`
+	Pebble  Pebble `mapstructure:"pebble" yaml:"pebble"`
+}
+
+type Pebble struct {
+	DisableWAL       bool   `mapstructure:"disableWAL" yaml:"disableWAL"`
+	DataPath         string `mapstructure:"dataPath" yaml:"dataPath"`
+	CacheSizeMB      int64  `mapstructure:"cacheSizeMb" yaml:"cacheSizeMb"`
+	InMemTableSizeMB uint64 `mapstructure:"inMemoryTableSizeMb" yaml:"inMemoryTableSizeMb"`
+}
+
+func Load(path *string) (*Config, error) {
 	var c Config
 
 	v := viper.New()
@@ -25,7 +44,7 @@ func PrepareConfig(path *string) (*Config, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	v.AutomaticEnv()
 
-	defaultConfigBytes, err := yaml.Marshal(&defaultConfig)
+	defaultConfigBytes, err := yaml.Marshal(defaultConfig)
 	if err != nil {
 		return nil, fmt.Errorf("error unmarshalling default config: %w", err)
 	}
@@ -48,5 +67,37 @@ func PrepareConfig(path *string) (*Config, error) {
 		return nil, fmt.Errorf("error unmarshalling config: %w", err)
 	}
 
+	if err := c.runPostLoadHooks(); err != nil {
+		return nil, fmt.Errorf("failed to run post load hooks for config: %w", err)
+	}
+
+	if err := c.validate(); err != nil {
+		return nil, fmt.Errorf("error validating config: %w", err)
+	}
+
 	return &c, nil
+}
+
+func (c *Config) validate() error {
+	if err := c.validateStorage(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) validateStorage() error {
+	if c.Storage.Persist == true && c.Storage.Pebble.DataPath == "" {
+		return fmt.Errorf("pebble's data path cannot be empty when persist is true")
+	}
+
+	return nil
+}
+
+func (c *Config) runPostLoadHooks() error {
+	if c.Storage.Persist == false {
+		c.Storage.Pebble.DataPath = ""
+	}
+
+	return nil
 }

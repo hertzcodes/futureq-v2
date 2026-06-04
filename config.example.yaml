@@ -1,18 +1,45 @@
+# ==============================================================================
+# Futureq Default Configuration Reference
+# ==============================================================================
+# This file represents the exact default state of a Futureq node. If you run 
+# the application without a config file, these are the values it will use.
+#
+# TO USE THIS FILE:
+# 1. Copy it and rename it to `config.yaml`.
+# 2. Adjust the values below to fit your deployment needs.
+# 3. Start the node (e.g., `./futureq --config config.yaml`).
+#
+# ENVIRONMENT VARIABLE OVERRIDES:
+# Every configuration value below can be overridden using environment variables 
+# by using the `FUTUREQ_` prefix and replacing dots with underscores. 
+# For example, to override the Pebble data path:
+# export FUTUREQ_STORAGE_PEBBLE_DATAPATH="/var/lib/futureq/data"
+# ==============================================================================
+
 observability:
-  logging:
+  logger:
+    # Controls the verbosity of the logs. 
+    # Valid options: debug, info, warn, error, fatal
     level: info
 
-persistence:
-  path: "./data"
-
-rabbitmq:
-  rabbitmq_server:
-    host: "127.0.0.1"
-    port: 5672
-    username: guest
-    password: guest
-    virtual_host: ""
-  rabbitmq_data_exchange:
-    consume_queue_name: "consume-queue"
-    declare_queue: false
-    produce_queue_name: "produce-queue"
+storage:
+  # When set to false, the node runs entirely in-memory using a virtual filesystem.
+  # All data will be destroyed when the process exits. Useful for testing or ephemeral workers.
+  persist: true
+  
+  pebble:
+    # Disabling the Write-Ahead Log (WAL) increases write throughput but risks 
+    # data loss of recently written keys in the event of a sudden crash.
+    disableWAL: false
+    
+    # The absolute or relative path where the database files will be stored on disk.
+    # Note: This is strictly ignored if `storage.persist` is set to false.
+    dataPath: "./data"
+    
+    # Size of the block cache in Megabytes. 
+    # Increase this value to improve performance on read-heavy workloads.
+    cacheSizeMb: 16
+    
+    # Size of the active in-memory table in Megabytes.
+    # Increase this value for write-heavy workloads. (Must be at least 1MB).
+    inMemoryTableSizeMb: 64

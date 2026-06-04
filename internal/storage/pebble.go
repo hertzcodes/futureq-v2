@@ -8,7 +8,8 @@ import (
 )
 
 type Pebble struct {
-	db *pebble.DB
+	db     *pebble.DB
+	logger *zap.Logger
 }
 
 func NewPebble(cfg config.Pebble, logger *zap.Logger) (*Pebble, error) {
@@ -29,12 +30,15 @@ func NewPebble(cfg config.Pebble, logger *zap.Logger) (*Pebble, error) {
 		DisableWAL:   cfg.DisableWAL,
 		Logger:       pebbleLogger.Sugar(),
 		Cache:        cache,
-		MemTableSize: cfg.InMemTableSizeMB,
+		MemTableSize: cfg.InMemTableSizeMB * 1024 * 1024,
+		// EventListener:,
 	}
 
 	if cfg.DataPath == "" {
 		dbOpts.FS = vfs.NewMem()
-		pebbleLogger.Info("Initializing Pebble DB in memory")
+		pebbleLogger.Info("Initializing Pebble DB in memory", zap.Bool("persist", false))
+	} else {
+		pebbleLogger.Info("Initializing Pebble DB", zap.Bool("persist", true))
 	}
 
 	db, err := pebble.Open(cfg.DataPath, dbOpts)
@@ -43,6 +47,7 @@ func NewPebble(cfg config.Pebble, logger *zap.Logger) (*Pebble, error) {
 	}
 
 	return &Pebble{
-		db: db,
+		db:     db,
+		logger: logger,
 	}, nil
 }
