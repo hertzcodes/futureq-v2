@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 
 	"github.com/cockroachdb/pebble"
+	"github.com/futureq-io/futureq/internal/app"
+	"go.uber.org/zap"
 )
 
 var eventsLastIDKey = []byte("metadata/event-repo/last-id")
@@ -43,8 +45,11 @@ func (er *EventRepository) Store(bucket uint64, data []byte) error {
 	binary.BigEndian.PutUint64(idBytes, nextID)
 
 	b := er.db.NewBatch()
-	defer b.Close()
-
+	defer func() {
+		if err := b.Close(); err != nil {
+			app.A.Logger.Error("failed to close batch", zap.Error(err))
+		}
+	}()
 	// incr last id
 	_ = b.Set(eventsLastIDKey, idBytes, nil)
 	// store event

@@ -28,14 +28,14 @@ type App struct {
 	// goroutine watching a.Ctx.Done() can safely read ShutCtx.
 	ShutCtx context.Context
 	cancel  context.CancelCauseFunc
-	logger  *zap.Logger
+	Logger  *zap.Logger
 	wg      sync.WaitGroup
 }
 
 func Init(cfg *config.Config, logger *zap.Logger) (*App, error) {
 	a := &App{
 		cfg:    cfg,
-		logger: logger.Named("app"),
+		Logger: logger.Named("app"),
 	}
 
 	a.Ctx, a.cancel = context.WithCancelCause(context.Background())
@@ -73,7 +73,7 @@ func (a *App) WithGracefulShutdown() error {
 	defer signal.Stop(sigterm)
 
 	<-sigterm
-	a.logger.Info("received interrupt, shutting down gracefully...")
+	a.Logger.Info("received interrupt, shutting down gracefully...")
 
 	// 1. Create the shared shutdown window.
 	// We MUST use context.Background() as the parent, because if we use a.Ctx,
@@ -99,18 +99,18 @@ func (a *App) WithGracefulShutdown() error {
 
 	select {
 	case <-waitDone:
-		a.logger.Info("graceful shutdown completed before timeout")
+		a.Logger.Info("graceful shutdown completed before timeout")
 	case <-shutCtx.Done():
-		a.logger.Warn("graceful shutdown timeout exceeded, forcing exit")
+		a.Logger.Warn("graceful shutdown timeout exceeded, forcing exit")
 	}
 
 	// 4. Safely close Pebble DB.
 	if a.Pebble != nil && a.Pebble.DB != nil {
-		a.logger.Info("closing Pebble DB...")
+		a.Logger.Info("closing Pebble DB...")
 		if err := a.Pebble.DB.Close(); err != nil {
-			a.logger.Error("failed to close Pebble DB", zap.Error(err))
+			a.Logger.Error("failed to close Pebble DB", zap.Error(err))
 		} else {
-			a.logger.Info("Pebble DB closed successfully")
+			a.Logger.Info("Pebble DB closed successfully")
 		}
 	}
 

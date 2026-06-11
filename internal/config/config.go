@@ -101,7 +101,7 @@ func (c *Config) validateStorage() error {
 	}
 
 	if c.Storage.TimeBucketSize < 1*time.Millisecond {
-		return fmt.Errorf("time bucket size %s is too short! Minimum amount must be 1ms", c.Storage.TimeBucketSize)
+		c.Storage.TimeBucketSize = 0
 	}
 
 	return nil
