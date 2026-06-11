@@ -1,6 +1,6 @@
 module github.com/futureq-io/futureq
 
-go 1.24
+go 1.26.2
 
 require (
 	github.com/cockroachdb/pebble v1.1.5
