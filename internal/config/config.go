@@ -31,8 +31,9 @@ type Logger struct {
 }
 
 type Storage struct {
-	Persist bool   `mapstructure:"persist" yaml:"persist"`
-	Pebble  Pebble `mapstructure:"pebble" yaml:"pebble"`
+	Persist        bool          `mapstructure:"persist" yaml:"persist"`
+	TimeBucketSize time.Duration `mapstructure:"timeBucketSize" yaml:"timeBucketSize"`
+	Pebble         Pebble        `mapstructure:"pebble" yaml:"pebble"`
 }
 
 type Pebble struct {
@@ -97,6 +98,10 @@ func (c *Config) validate() error {
 func (c *Config) validateStorage() error {
 	if c.Storage.Persist && c.Storage.Pebble.DataPath == "" {
 		return fmt.Errorf("pebble's data path cannot be empty when persist is true")
+	}
+
+	if c.Storage.TimeBucketSize < 1*time.Millisecond {
+		return fmt.Errorf("time bucket size %s is too short! Minimum amount must be 1ms", c.Storage.TimeBucketSize)
 	}
 
 	return nil

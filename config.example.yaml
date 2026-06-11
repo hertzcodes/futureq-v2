@@ -1,7 +1,7 @@
 # ==============================================================================
 # Futureq Default Configuration Reference
 # ==============================================================================
-# This file represents the exact default state of a Futureq node. If you run 
+# This file represents the exact default state of a Futureq node. If you run
 # the application without a config file, these are the values it will use.
 #
 # TO USE THIS FILE:
@@ -10,8 +10,8 @@
 # 3. Start the node (e.g., `./futureq --config config.yaml`).
 #
 # ENVIRONMENT VARIABLE OVERRIDES:
-# Every configuration value below can be overridden using environment variables 
-# by using the `FUTUREQ_` prefix and replacing dots with underscores. 
+# Every configuration value below can be overridden using environment variables
+# by using the `FUTUREQ_` prefix and replacing dots with underscores.
 # For example, to override the Pebble data path:
 # export FUTUREQ_STORAGE_PEBBLE_DATAPATH="/var/lib/futureq/data"
 # ==============================================================================
@@ -24,7 +24,7 @@ server:
 
 observability:
   logger:
-    # Controls the verbosity of the logs. 
+    # Controls the verbosity of the logs.
     # Valid options: debug, info, warn, error, fatal
     level: info
 
@@ -32,20 +32,25 @@ storage:
   # When set to false, the node runs entirely in-memory using a virtual filesystem.
   # All data will be destroyed when the process exits. Useful for testing or ephemeral workers.
   persist: true
-  
+
+  # The bucket size for storing events. Minimum amount must be 1ms.
+  # Using large time buckets (e.g., 1s) reduces the number of keys in the DB
+  # and may improve performance, but it also means you will have less precision on deliveries.
+  timeBucketSize: 1ms
+
   pebble:
-    # Disabling the Write-Ahead Log (WAL) increases write throughput but risks 
+    # Disabling the Write-Ahead Log (WAL) increases write throughput but risks
     # data loss of recently written keys in the event of a sudden crash.
     disableWAL: false
-    
+
     # The absolute or relative path where the database files will be stored on disk.
     # Note: This is strictly ignored if `storage.persist` is set to false.
     dataPath: "./data"
-    
-    # Size of the block cache in Megabytes. 
+
+    # Size of the block cache in Megabytes.
     # Increase this value to improve performance on read-heavy workloads.
     cacheSizeMb: 16
-    
+
     # Size of the active in-memory table in Megabytes.
     # Increase this value for write-heavy workloads. (Must be at least 1MB).
     inMemoryTableSizeMb: 64

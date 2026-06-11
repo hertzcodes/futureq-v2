@@ -16,7 +16,8 @@ var defaultConfig = Config{
 	},
 
 	Storage: Storage{
-		Persist: true,
+		Persist:        true,
+		TimeBucketSize: 1 * time.Millisecond,
 		Pebble: Pebble{
 			DisableWAL:       false,
 			DataPath:         "./data",
