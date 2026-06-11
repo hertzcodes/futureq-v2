@@ -8,7 +8,7 @@ import (
 )
 
 type Pebble struct {
-	db     *pebble.DB
+	DB     *pebble.DB
 	logger *zap.Logger
 }
 
@@ -47,7 +47,7 @@ func NewPebble(cfg config.Pebble, logger *zap.Logger) (*Pebble, error) {
 	}
 
 	return &Pebble{
-		db:     db,
+		DB:     db,
 		logger: logger,
 	}, nil
 }

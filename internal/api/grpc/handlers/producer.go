@@ -1,24 +1,31 @@
 package handlers
 
 import (
-	proto "github.com/futureq-io/futureq/proto/go"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/futureq-io/futureq/internal/repository"
+	proto "github.com/futureq-io/futureq/proto/go"
 )
 
 // ProducerHandler implements proto.FutureQProducerServer.
 type ProducerHandler struct {
 	proto.UnimplementedFutureQProducerServer
-	logger *zap.Logger
+	logger    *zap.Logger
+	eventRepo *repository.EventRepository
 }
 
 // NewProducerHandler returns an initialised ProducerHandler.
 func NewProducerHandler(logger *zap.Logger) *ProducerHandler {
-	return &ProducerHandler{
+	ph := &ProducerHandler{
 		logger: logger.Named("producer"),
 	}
+
+	ph.eventRepo = repository.NewEventRepository(nil)
+
+	return ph
 }
 
 // PublishStream handles a bidirectional stream where clients send

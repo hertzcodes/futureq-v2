@@ -37,12 +37,9 @@ func startRun(_ *cobra.Command, _ []string) {
 		logger.Fatal("failed to init app", zap.Error(err))
 	}
 
-
 	app.WithGRPC()
 
-	go func() {
-		if err := app.WithGracefulShutdown(); err != nil {
-			logger.Error("graceful shutdown error", zap.Error(err))
-		}
-	}()
+	if err := app.WithGracefulShutdown(); err != nil {
+		logger.Fatal("failed to graceful shutdown", zap.Error(err))
+	}
 }

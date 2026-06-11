@@ -17,17 +17,19 @@ import (
 
 const gracefulShutdownTimeout = 10 * time.Second
 
-type app struct {
+var A *App
+
+type App struct {
 	cfg        *config.Config
-	db         *storage.Pebble
+	Pebble     *storage.Pebble
 	grpcServer *grpcapi.Server
 	ctx        context.Context
 	cancel     context.CancelCauseFunc
 	logger     *zap.Logger
 }
 
-func Init(cfg *config.Config, logger *zap.Logger) (*app, error) {
-	a := &app{
+func Init(cfg *config.Config, logger *zap.Logger) (*App, error) {
+	a := &App{
 		cfg:    cfg,
 		logger: logger.Named("app"),
 	}
@@ -39,8 +41,10 @@ func Init(cfg *config.Config, logger *zap.Logger) (*app, error) {
 		return nil, fmt.Errorf("failed to initialize pebble storage: %w", err)
 	}
 
-	a.db = pebble
+	a.Pebble = pebble
 	a.grpcServer = grpcapi.New(cfg.Server, logger)
+
+	A = a
 
 	return a, nil
 }
@@ -48,7 +52,7 @@ func Init(cfg *config.Config, logger *zap.Logger) (*app, error) {
 // WithGRPC launches the gRPC server in a background goroutine and forwards any
 // serve error back through the returned channel. The caller should select on
 // that channel alongside other termination signals.
-func (a *app) WithGRPC() {
+func (a *App) WithGRPC() {
 	go func() {
 		if err := a.grpcServer.Listen(a.cfg.Server.Listen); err != nil {
 			a.logger.Fatal("grpc server error", zap.Error(err))
@@ -59,7 +63,7 @@ func (a *app) WithGRPC() {
 // WithGracefulShutdown blocks until SIGINT or SIGTERM is received, then
 // cancels the application context and gives the gRPC server up to
 // gracefulShutdownTimeout to finish in-flight RPCs before returning.
-func (a *app) WithGracefulShutdown() error {
+func (a *App) WithGracefulShutdown() error {
 	sigterm := make(chan os.Signal, 1)
 	signal.Notify(sigterm, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigterm)
@@ -70,7 +74,7 @@ func (a *app) WithGracefulShutdown() error {
 	a.cancel(errors.New("graceful shutdown triggered"))
 
 	shutCtx, shutCancel := context.WithTimeoutCause(
-		context.Background(),
+		a.ctx,
 		gracefulShutdownTimeout,
 		errors.New("graceful shutdown timeout exceeded"),
 	)
@@ -79,6 +83,5 @@ func (a *app) WithGracefulShutdown() error {
 
 	a.grpcServer.Shutdown(shutCtx)
 
-	a.logger.Info("server exited properly")
 	return nil
 }
