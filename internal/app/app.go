@@ -52,6 +52,11 @@ func Init(cfg *config.Config, logger *zap.Logger) (*App, error) {
 	return a, nil
 }
 
+// Config returns the application configuration.
+func (a *App) Config() *config.Config {
+	return a.cfg
+}
+
 // RegisterComponentWithShutdown increments the application wait group to track active components during shutdown.
 func (a *App) RegisterComponentWithShutdown() {
 	a.wg.Add(1)
