@@ -2,11 +2,11 @@ package grpc
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"time"
 
 	"github.com/futureq-io/futureq/internal/api/grpc/handlers"
+	"github.com/futureq-io/futureq/internal/app"
 	"github.com/futureq-io/futureq/internal/config"
 	proto "github.com/futureq-io/futureq/proto/go"
 	"go.uber.org/zap"
@@ -18,6 +18,7 @@ import (
 type Server struct {
 	srv    *grpc.Server
 	logger *zap.Logger
+	addr   string
 }
 
 // New creates a fully configured gRPC server and registers all service
@@ -52,42 +53,56 @@ func New(cfg config.Server, logger *zap.Logger) *Server {
 	return &Server{
 		srv:    srv,
 		logger: log,
+		addr:   cfg.Listen,
 	}
 }
 
 // Listen binds the TCP listener and blocks serving until the underlying
 // gRPC server is stopped. Call Shutdown to stop it gracefully.
-func (s *Server) Listen(address string) error {
-	lis, err := net.Listen("tcp", address)
-	if err != nil {
-		return fmt.Errorf("grpc: failed to bind %s: %w", address, err)
-	}
-
-	s.logger.Info("gRPC server listening", zap.String("address", address))
-
-	if err := s.srv.Serve(lis); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// Shutdown attempts a graceful stop within the deadline carried by ctx.
-// If the deadline expires before all RPCs finish, it hard-stops the server.
-func (s *Server) Shutdown(ctx context.Context) {
-	s.logger.Info("gRPC server: initiating graceful shutdown")
-
-	done := make(chan struct{})
+func (s *Server) Listen() *Server {
 	go func() {
-		s.srv.GracefulStop()
-		close(done)
+		lis, err := net.Listen("tcp", s.addr)
+		if err != nil {
+			s.logger.Fatal("gRPC: failed to bind", zap.String("address", s.addr), zap.Error(err))
+		}
+
+		s.logger.Info("gRPC server listening", zap.String("address", s.addr))
+
+		if err := s.srv.Serve(lis); err != nil {
+			s.logger.Fatal("gRPC: failed to serve", zap.Error(err))
+		}
 	}()
 
-	select {
-	case <-done:
-		s.logger.Info("gRPC server: stopped gracefully")
-	case <-ctx.Done():
-		s.logger.Warn("gRPC server: graceful shutdown timed out, forcing stop")
-		s.srv.Stop()
-	}
+	return s
+}
+
+// WaitForShutdown registers a background shutdown handler that runs when ctx (the global app.Ctx)
+// is cancelled. When triggered, it gracefully stops the gRPC server within the deadline
+// carried by app.A.ShutCtx (or a 10s fallback).
+func (s *Server) WaitForShutdown(ctx context.Context) {
+	app.A.RegisterComponentWithShutdown()
+
+	go func() {
+		defer app.A.ComponentShutdownDone()
+
+		<-ctx.Done()
+
+		s.logger.Info("gRPC server: initiating graceful shutdown")
+
+		shutCtx := app.A.ShutCtx
+
+		done := make(chan struct{})
+		go func() {
+			s.srv.GracefulStop()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			s.logger.Info("gRPC server: stopped gracefully")
+		case <-shutCtx.Done():
+			s.logger.Warn("gRPC server: graceful shutdown timed out, forcing stop")
+			s.srv.Stop()
+		}
+	}()
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"github.com/futureq-io/futureq/internal/api/grpc"
 	"github.com/futureq-io/futureq/internal/app"
 	"github.com/futureq-io/futureq/internal/config"
 	"github.com/futureq-io/futureq/pkg/log"
@@ -32,14 +33,14 @@ func startRun(_ *cobra.Command, _ []string) {
 		stdLogger.Fatalf("failed to init logger: %v", err)
 	}
 
-	app, err := app.Init(cfg, logger)
+	a, err := app.Init(cfg, logger)
 	if err != nil {
 		logger.Fatal("failed to init app", zap.Error(err))
 	}
 
-	app.WithGRPC()
+	grpc.New(cfg.Server, logger).Listen().WaitForShutdown(a.Ctx)
 
-	if err := app.WithGracefulShutdown(); err != nil {
+	if err := a.WithGracefulShutdown(); err != nil {
 		logger.Fatal("failed to graceful shutdown", zap.Error(err))
 	}
 }

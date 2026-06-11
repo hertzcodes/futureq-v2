@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
-	grpcapi "github.com/futureq-io/futureq/internal/api/grpc"
 	"github.com/futureq-io/futureq/internal/config"
 	"github.com/futureq-io/futureq/internal/storage"
 	"go.uber.org/zap"
@@ -20,12 +20,16 @@ const gracefulShutdownTimeout = 10 * time.Second
 var A *App
 
 type App struct {
-	cfg        *config.Config
-	Pebble     *storage.Pebble
-	grpcServer *grpcapi.Server
-	ctx        context.Context
-	cancel     context.CancelCauseFunc
-	logger     *zap.Logger
+	cfg    *config.Config
+	Pebble *storage.Pebble
+	Ctx    context.Context
+	// ShutCtx is the 10-second shutdown window context. It is populated by
+	// WithGracefulShutdown immediately before a.Ctx is cancelled, so any
+	// goroutine watching a.Ctx.Done() can safely read ShutCtx.
+	ShutCtx context.Context
+	cancel  context.CancelCauseFunc
+	logger  *zap.Logger
+	wg      sync.WaitGroup
 }
 
 func Init(cfg *config.Config, logger *zap.Logger) (*App, error) {
@@ -34,7 +38,7 @@ func Init(cfg *config.Config, logger *zap.Logger) (*App, error) {
 		logger: logger.Named("app"),
 	}
 
-	a.ctx, a.cancel = context.WithCancelCause(context.Background())
+	a.Ctx, a.cancel = context.WithCancelCause(context.Background())
 
 	pebble, err := storage.NewPebble(cfg.Storage.Pebble, logger)
 	if err != nil {
@@ -42,27 +46,22 @@ func Init(cfg *config.Config, logger *zap.Logger) (*App, error) {
 	}
 
 	a.Pebble = pebble
-	a.grpcServer = grpcapi.New(cfg.Server, logger)
 
 	A = a
 
 	return a, nil
 }
 
-// WithGRPC launches the gRPC server in a background goroutine and forwards any
-// serve error back through the returned channel. The caller should select on
-// that channel alongside other termination signals.
-func (a *App) WithGRPC() {
-	go func() {
-		if err := a.grpcServer.Listen(a.cfg.Server.Listen); err != nil {
-			a.logger.Fatal("grpc server error", zap.Error(err))
-		}
-	}()
+// RegisterComponentWithShutdown increments the application wait group to track active components during shutdown.
+func (a *App) RegisterComponentWithShutdown() {
+	a.wg.Add(1)
 }
 
-// WithGracefulShutdown blocks until SIGINT or SIGTERM is received, then
-// cancels the application context and gives the gRPC server up to
-// gracefulShutdownTimeout to finish in-flight RPCs before returning.
+// ComponentShutdownDone decrements the application wait group.
+func (a *App) ComponentShutdownDone() {
+	a.wg.Done()
+}
+
 func (a *App) WithGracefulShutdown() error {
 	sigterm := make(chan os.Signal, 1)
 	signal.Notify(sigterm, os.Interrupt, syscall.SIGTERM)
@@ -71,17 +70,44 @@ func (a *App) WithGracefulShutdown() error {
 	<-sigterm
 	a.logger.Info("received interrupt, shutting down gracefully...")
 
-	a.cancel(errors.New("graceful shutdown triggered"))
-
+	// 1. Create the shared shutdown window.
+	// We MUST use context.Background() as the parent, because if we use a.Ctx,
+	// calling a.cancel() will immediately cancel shutCtx, causing an instant timeout.
 	shutCtx, shutCancel := context.WithTimeoutCause(
-		a.ctx,
+		context.Background(),
 		gracefulShutdownTimeout,
 		errors.New("graceful shutdown timeout exceeded"),
 	)
-
 	defer shutCancel()
 
-	a.grpcServer.Shutdown(shutCtx)
+	a.ShutCtx = shutCtx
+
+	// 2. Signal all components to start winding down.
+	a.cancel(errors.New("graceful shutdown triggered"))
+
+	// 3. Wait for all registered components to finish, or the timeout to expire.
+	waitDone := make(chan struct{})
+	go func() {
+		a.wg.Wait()
+		close(waitDone)
+	}()
+
+	select {
+	case <-waitDone:
+		a.logger.Info("graceful shutdown completed before timeout")
+	case <-shutCtx.Done():
+		a.logger.Warn("graceful shutdown timeout exceeded, forcing exit")
+	}
+
+	// 4. Safely close Pebble DB.
+	if a.Pebble != nil && a.Pebble.DB != nil {
+		a.logger.Info("closing Pebble DB...")
+		if err := a.Pebble.DB.Close(); err != nil {
+			a.logger.Error("failed to close Pebble DB", zap.Error(err))
+		} else {
+			a.logger.Info("Pebble DB closed successfully")
+		}
+	}
 
 	return nil
 }
