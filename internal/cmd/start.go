@@ -29,12 +29,12 @@ func startRun(_ *cobra.Command, _ []string) {
 
 	logger, err := log.InitLogger(config.Observability.Logger)
 	if err != nil {
-		stdLogger.Fatal("failed to init logger: %v", err)
+		stdLogger.Fatalf("failed to init logger: %v", err)
 	}
 
 	app, err := app.Init(config, logger)
 	if err != nil {
-		logger.Fatal("failed to init app: %v", zap.Error(err))
+		logger.Fatal("failed to init app", zap.Error(err))
 	}
 
 	_ = app

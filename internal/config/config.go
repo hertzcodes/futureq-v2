@@ -92,7 +92,7 @@ func (c *Config) validate() error {
 }
 
 func (c *Config) validateStorage() error {
-	if c.Storage.Persist == true && c.Storage.Pebble.DataPath == "" {
+	if c.Storage.Persist && c.Storage.Pebble.DataPath == "" {
 		return fmt.Errorf("pebble's data path cannot be empty when persist is true")
 	}
 
@@ -100,7 +100,7 @@ func (c *Config) validateStorage() error {
 }
 
 func (c *Config) runPostLoadHooks() error {
-	if c.Storage.Persist == false {
+	if !c.Storage.Persist {
 		c.Storage.Pebble.DataPath = ""
 	}
 

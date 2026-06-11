@@ -7,9 +7,7 @@ import (
 )
 
 func InitLogger(cfg config.Logger) (*zap.Logger, error) {
-	var zapConfig zap.Config
-
-	zapConfig = zap.NewProductionConfig()
+	zapConfig := zap.NewProductionConfig()
 	zapConfig.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	zapConfig.EncoderConfig.TimeKey = "timestamp"
 
