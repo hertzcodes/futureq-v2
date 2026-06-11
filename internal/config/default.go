@@ -1,6 +1,10 @@
 package config
 
 var defaultConfig = Config{
+	Server: Server{
+		Listen: "0.0.0.0:8443",
+	},
+
 	Observability: Observability{
 		Logger: Logger{
 			Level: "info",

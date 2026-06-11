@@ -4,14 +4,14 @@ Copyright © 2025 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
+	stdLogger "log"
+
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
+	"github.com/futureq-io/futureq/internal/app"
 	"github.com/futureq-io/futureq/internal/config"
-	"github.com/futureq-io/futureq/internal/q"
-	"github.com/futureq-io/futureq/internal/storage"
-	"github.com/futureq-io/futureq/internal/ticker"
+	"github.com/futureq-io/futureq/pkg/log"
 )
 
 // startCmd represents the server command
@@ -21,71 +21,21 @@ var startCmd = &cobra.Command{
 	Run:   startRun,
 }
 
-var (
-	configFile *string
-)
-
-func init() {
-	configFile = startCmd.Flags().StringP("config", "c", "", "Path to config file")
-
-	rootCmd.AddCommand(startCmd)
-}
-
 func startRun(_ *cobra.Command, _ []string) {
-	var logger *zap.Logger
-
-	loggerConfig := zap.NewProductionConfig()
-	loggerConfig.DisableCaller = true
-	loggerConfig.DisableStacktrace = true
-	loggerConfig.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
-	loggerConfig.EncoderConfig.TimeKey = "time"
-	loggerConfig.EncoderConfig.EncodeTime = zapcore.RFC3339TimeEncoder
-	logger, _ = loggerConfig.Build()
-	defer func() {
-		_ = logger.Sync()
-	}()
-
-	cfg, err := config.PrepareConfig(configFile)
+	config, err := config.Load(cfgFile)
 	if err != nil {
-		logger.Fatal("error loading config", zap.Error(err))
+		stdLogger.Fatalf("failed to load config: %v", err)
 	}
 
-	// Post setup of logger after parsing the config
-	lvl, err := zap.ParseAtomicLevel(cfg.Observability.Logging.Level)
+	logger, err := log.InitLogger(config.Observability.Logger)
 	if err != nil {
-		logger.With(zap.Error(err)).Error("invalid observability.logging.level, continuing with default level: info")
-	} else {
-		loggerConfig.Level = lvl
-		logger, _ = loggerConfig.Build()
+		stdLogger.Fatal("failed to init logger: %v", err)
 	}
 
-	taskStorage := storage.NewMemoryArray(cfg.Persistence)
-	err = taskStorage.InitiatePersistence()
+	app, err := app.Init(config, logger)
 	if err != nil {
-		logger.Fatal("error initializing persistence", zap.Error(err))
+		logger.Fatal("failed to init app: %v", zap.Error(err))
 	}
 
-	if cfg.RabbitMQ != nil {
-		rabbitmqQ := q.NewRabbitMQ(*cfg.RabbitMQ, logger.Named("rabbitmq"), taskStorage)
-		defer rabbitmqQ.Close()
-
-		err := rabbitmqQ.Connect()
-		if err != nil {
-			logger.Fatal("error connecting to rabbitmq", zap.Error(err))
-		}
-
-		err = rabbitmqQ.Consume()
-		if err != nil {
-			logger.Fatal("error consuming rabbitmq", zap.Error(err))
-		}
-
-		t := ticker.NewTicker(taskStorage, rabbitmqQ)
-
-		go t.Tick()
-	}
-
-	logger.Info("starting server")
-	var forever chan struct{}
-
-	<-forever
+	_ = app
 }

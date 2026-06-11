@@ -16,6 +16,10 @@
 # export FUTUREQ_STORAGE_PEBBLE_DATAPATH="/var/lib/futureq/data"
 # ==============================================================================
 
+server:
+  # Grpc listen address
+  listen: "0.0.0.0:8443"
+
 observability:
   logger:
     # Controls the verbosity of the logs. 

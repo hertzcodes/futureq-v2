@@ -2,3 +2,5 @@ config.yaml
 config.yml
 !config.example.yaml
 dev-config.yaml
+*.pdf
+*.html

@@ -10,8 +10,13 @@ import (
 )
 
 type Config struct {
+	Server        Server        `mapstructure:"server" yaml:"server"`
 	Observability Observability `mapstructure:"observability" yaml:"observability"`
 	Storage       Storage       `mapstructure:"storage" yaml:"storage"`
+}
+
+type Server struct {
+	Listen string `mapstructure:"listen" yaml:"listen"`
 }
 
 type Observability struct {
@@ -34,7 +39,7 @@ type Pebble struct {
 	InMemTableSizeMB uint64 `mapstructure:"inMemoryTableSizeMb" yaml:"inMemoryTableSizeMb"`
 }
 
-func Load(path *string) (*Config, error) {
+func Load(path string) (*Config, error) {
 	var c Config
 
 	v := viper.New()
@@ -54,8 +59,8 @@ func Load(path *string) (*Config, error) {
 		return nil, fmt.Errorf("error reading default config: %w", err)
 	}
 
-	if path != nil && *path != "" {
-		v.SetConfigFile(*path)
+	if path != "" {
+		v.SetConfigFile(path)
 		err = v.MergeInConfig()
 		if err != nil {
 			return nil, fmt.Errorf("error merge config: %w", err)
