@@ -22,20 +22,27 @@ var startCmd = &cobra.Command{
 }
 
 func startRun(_ *cobra.Command, _ []string) {
-	config, err := config.Load(cfgFile)
+	cfg, err := config.Load(cfgFile)
 	if err != nil {
 		stdLogger.Fatalf("failed to load config: %v", err)
 	}
 
-	logger, err := log.InitLogger(config.Observability.Logger)
+	logger, err := log.InitLogger(cfg.Observability.Logger)
 	if err != nil {
 		stdLogger.Fatalf("failed to init logger: %v", err)
 	}
 
-	app, err := app.Init(config, logger)
+	app, err := app.Init(cfg, logger)
 	if err != nil {
 		logger.Fatal("failed to init app", zap.Error(err))
 	}
 
-	_ = app
+
+	app.WithGRPC()
+
+	go func() {
+		if err := app.WithGracefulShutdown(); err != nil {
+			logger.Error("graceful shutdown error", zap.Error(err))
+		}
+	}()
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v2"
@@ -16,7 +17,9 @@ type Config struct {
 }
 
 type Server struct {
-	Listen string `mapstructure:"listen" yaml:"listen"`
+	Listen   string        `mapstructure:"listen" yaml:"listen"`
+	MaxConns uint32        `mapstructure:"maxConns" yaml:"maxConns"`
+	Timeout  time.Duration `mapstructure:"timeout" yaml:"timeout"`
 }
 
 type Observability struct {

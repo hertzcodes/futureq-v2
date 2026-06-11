@@ -19,6 +19,8 @@
 server:
   # Grpc listen address
   listen: "0.0.0.0:8443"
+  maxConns: 10
+  timeout: 5s
 
 observability:
   logger:
