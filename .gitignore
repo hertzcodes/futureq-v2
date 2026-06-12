@@ -5,3 +5,4 @@ dev-config.yaml
 *.pdf
 *.html
 e2e-tests
+main
