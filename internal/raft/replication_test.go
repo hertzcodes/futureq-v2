@@ -122,7 +122,10 @@ func testReplication(t *testing.T, disableWAL bool) {
 	for i, a := range apps {
 		fmt.Printf("Checking follower %d\n", i+1)
 		require.Eventuallyf(t, func() bool {
-			iter := a.Pebble.DB.NewIter(nil)
+			iter, err := a.Pebble.DB.NewIter(nil)
+			if err != nil {
+				return false
+			}
 			defer iter.Close()
 			for iter.First(); iter.Valid(); iter.Next() {
 				if string(iter.Value()) == "test_data" {

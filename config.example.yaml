@@ -62,3 +62,5 @@ raft:
   dataPath: "./raft-data"
   initialMembers:
     1: "0.0.0.0:50005"
+  rttMillisecond: 200
+  followerReadMode: "strong"

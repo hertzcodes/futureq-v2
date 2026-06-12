@@ -1,8 +1,8 @@
 package storage
 
 import (
-	"github.com/cockroachdb/pebble"
-	"github.com/cockroachdb/pebble/vfs"
+	"github.com/cockroachdb/pebble/v2"
+	"github.com/cockroachdb/pebble/v2/vfs"
 	"github.com/futureq-io/futureq/internal/config"
 	"go.uber.org/zap"
 )
@@ -26,12 +26,13 @@ func NewPebble(cfg config.Pebble, logger *zap.Logger) (*Pebble, error) {
 	// this somehow prevents memory leaks in the opts
 	defer cache.Unref()
 
+	eventListener := pebble.MakeLoggingEventListener(pebbleLogger.Sugar())
 	dbOpts := &pebble.Options{
-		DisableWAL:   cfg.DisableWAL,
-		Logger:       pebbleLogger.Sugar(),
-		Cache:        cache,
-		MemTableSize: int(cfg.InMemTableSizeMB * 1024 * 1024),
-		// EventListener:,
+		DisableWAL:    cfg.DisableWAL,
+		Logger:        pebbleLogger.Sugar(),
+		Cache:         cache,
+		MemTableSize:  cfg.InMemTableSizeMB * 1024 * 1024,
+		EventListener: &eventListener,
 	}
 
 	if cfg.DataPath == "" {

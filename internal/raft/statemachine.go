@@ -6,7 +6,7 @@ import (
 	"io"
 	"log"
 
-	"github.com/cockroachdb/pebble"
+	"github.com/cockroachdb/pebble/v2"
 	"github.com/futureq-io/futureq/internal/repository"
 	"github.com/lni/dragonboat/v4/statemachine"
 	"go.uber.org/zap"
@@ -157,7 +157,10 @@ func (s *EventStateMachine) SaveSnapshot(_ interface{}, w io.Writer, stopc <-cha
 	snapshot := s.db.NewSnapshot()
 	defer snapshot.Close()
 
-	iter := snapshot.NewIter(nil)
+	iter, err := snapshot.NewIter(nil)
+	if err != nil {
+		return err
+	}
 	defer iter.Close()
 
 	for iter.First(); iter.Valid(); iter.Next() {
@@ -264,7 +267,10 @@ func (s *EventStateMachine) RecoverFromSnapshot(r io.Reader, stopc <-chan struct
 // Called exclusively from RecoverFromSnapshot to wipe stale state before
 // installing a new snapshot.
 func (s *EventStateMachine) clearDB(stopc <-chan struct{}) error {
-	iter := s.db.NewIter(nil)
+	iter, err := s.db.NewIter(nil)
+	if err != nil {
+		return err
+	}
 	defer iter.Close()
 
 	batch := s.db.NewBatch()
