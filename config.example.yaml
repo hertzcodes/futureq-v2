@@ -56,11 +56,55 @@ storage:
     inMemoryTableSizeMb: 64
 
 raft:
+  # Unique integer ID of the current node in the Raft cluster (e.g. 1, 2, 3).
+  # Use '0' (or omit the raft section entirely) to run the node in standalone
+  # mode without Raft replication (writing directly to Pebble).
   nodeId: 1
+
+  # Unique integer ID of the Raft replication shard/cluster.
   clusterId: 1
+
+  # The address the Raft engine (Dragonboat NodeHost) listens on for
+  # intra-cluster consensus messages (heartbeats, proposals, snapshots).
   listenAddress: "0.0.0.0:50005"
+
+  # The directory where Raft WAL logs and cluster metadata are stored.
   dataPath: "./raft-data"
+
+  # Map of all initial voting members of the cluster (Node ID -> Raft Address).
+  # This list must be identical across all cluster nodes on initial bootstrap.
   initialMembers:
     1: "0.0.0.0:50005"
+
+  # Average round-trip latency (RTT) between Raft peers in milliseconds.
+  # Dragonboat uses this to calibrate election timeouts (10 * RTT) and
+  # heartbeat intervals (1 * RTT).
+  #
+  # - For production WAN/cloud deploys: use 100-200.
+  # - For low-latency data centers or local test runs: set to 10-20 to trigger
+  #   faster leader failover and speed up the replication loop.
   rttMillisecond: 200
+
+  # Controls the read consistency model when querying follower nodes:
+  #
+  # - "strong": Follower uses the ReadIndex protocol to check with the leader,
+  #             guaranteeing linearizable, strongly consistent reads.
+  #             Adds 1 network RTT.
+  # - "eventual": Follower reads directly from its local Pebble replica state.
+  #               Saves a network RTT, but reads can be slightly stale (lagged
+  #               by up to a heartbeat window).
   followerReadMode: "strong"
+
+  # Number of committed Raft log entries to write before a new database
+  # snapshot is created and old log files are deleted (compacted) from disk.
+  #
+  # - Higher values (e.g. 100000) are recommended for high-throughput write
+  #   workloads to avoid frequent I/O spikes and write stalls.
+  # - Lower values (e.g. 10000) keep the disk usage of Raft logs smaller and
+  #   make node restarts faster.
+  snapShotEntries: 10000
+
+  # Number of log entries to retain after taking a snapshot. This acts as
+  # a buffer so that if a follower falls slightly behind, the leader can
+  # sync it using incremental log updates rather than a full snapshot stream.
+  compactionOverHead: 5000

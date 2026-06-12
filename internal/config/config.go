@@ -69,7 +69,9 @@ type Raft struct {
 	//                responding.  Linearizable, but adds a network round-trip.
 	//
 	// Default: "strong".
-	FollowerReadMode string `mapstructure:"followerReadMode" yaml:"followerReadMode"`
+	FollowerReadMode   string `mapstructure:"followerReadMode" yaml:"followerReadMode"`
+	SnapshotEntries    uint64 `mapstructure:"snapShotEntries" yaml:"snapShotEntries"`
+	CompactionOverhead uint64 `mapstructure:"compactionOverHead" yaml:"compactionOverHead"`
 }
 
 func Load(path string) (*Config, error) {
