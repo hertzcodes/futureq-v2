@@ -71,23 +71,14 @@ func Init(cfg *config.Config, logger *zap.Logger) (*App, error) {
 		}
 		a.NodeHost = nh
 
-		snapEntries := cfg.Raft.SnapshotEntries
-		if snapEntries == 0 {
-			snapEntries = 10000
-		}
-		compOverhead := cfg.Raft.CompactionOverhead
-		if compOverhead == 0 {
-			compOverhead = 5000
-		}
-
 		rc := raftconfig.Config{
 			ReplicaID:          cfg.Raft.NodeID,
 			ShardID:            cfg.Raft.ClusterID,
 			ElectionRTT:        10,
 			HeartbeatRTT:       1,
 			CheckQuorum:        true,
-			SnapshotEntries:    snapEntries,
-			CompactionOverhead: compOverhead,
+			SnapshotEntries:    cfg.Raft.SnapshotEntries,
+			CompactionOverhead: cfg.Raft.CompactionOverhead,
 		}
 
 		members := make(map[uint64]dragonboat.Target)

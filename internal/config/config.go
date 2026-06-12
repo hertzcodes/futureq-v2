@@ -126,6 +126,18 @@ func (c *Config) validate() error {
 	return nil
 }
 
+func (c *Config) validateRaft() error {
+	if c.Raft.SnapshotEntries == 0 {
+		return fmt.Errorf("raft's snapshot entries cannot be zero")
+	}
+
+	if c.Raft.CompactionOverhead == 0 {
+		return fmt.Errorf("raft's compaction overhead cannot be zero")
+	}
+
+	return nil
+}
+
 func (c *Config) validateStorage() error {
 	if c.Storage.Persist && c.Storage.Pebble.DataPath == "" {
 		return fmt.Errorf("pebble's data path cannot be empty when persist is true")
