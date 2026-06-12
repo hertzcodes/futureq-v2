@@ -30,7 +30,7 @@ func NewPebble(cfg config.Pebble, logger *zap.Logger) (*Pebble, error) {
 		DisableWAL:   cfg.DisableWAL,
 		Logger:       pebbleLogger.Sugar(),
 		Cache:        cache,
-		MemTableSize: cfg.InMemTableSizeMB * 1024 * 1024,
+		MemTableSize: int(cfg.InMemTableSizeMB * 1024 * 1024),
 		// EventListener:,
 	}
 

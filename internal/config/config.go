@@ -14,6 +14,7 @@ type Config struct {
 	Server        Server        `mapstructure:"server" yaml:"server"`
 	Observability Observability `mapstructure:"observability" yaml:"observability"`
 	Storage       Storage       `mapstructure:"storage" yaml:"storage"`
+	Raft          Raft          `mapstructure:"raft" yaml:"raft"`
 }
 
 type Server struct {
@@ -41,6 +42,34 @@ type Pebble struct {
 	DataPath         string `mapstructure:"dataPath" yaml:"dataPath"`
 	CacheSizeMB      int64  `mapstructure:"cacheSizeMb" yaml:"cacheSizeMb"`
 	InMemTableSizeMB uint64 `mapstructure:"inMemoryTableSizeMb" yaml:"inMemoryTableSizeMb"`
+}
+
+type Raft struct {
+	NodeID         uint64            `mapstructure:"nodeId" yaml:"nodeId"`
+	ClusterID      uint64            `mapstructure:"clusterId" yaml:"clusterId"`
+	ListenAddress  string            `mapstructure:"listenAddress" yaml:"listenAddress"`
+	DataPath       string            `mapstructure:"dataPath" yaml:"dataPath"`
+	InitialMembers map[uint64]string `mapstructure:"initialMembers" yaml:"initialMembers"`
+
+	// RTTMillisecond is the average round-trip latency between Raft peers in
+	// milliseconds.  Dragonboat uses this to calibrate election timeouts and
+	// heartbeat intervals.  Lower values mean faster leader failover but
+	// higher network overhead.  Default: 200.
+	RTTMillisecond uint64 `mapstructure:"rttMillisecond" yaml:"rttMillisecond"`
+
+	// FollowerReadMode controls how follower nodes serve read requests.
+	//
+	//   "eventual" – reads are served from local Pebble state, which may lag
+	//                behind the leader by up to one heartbeat interval
+	//                (RTTMillisecond * HeartbeatRTT ms).  Lower latency, but
+	//                the client may observe slightly stale data.
+	//
+	//   "strong"   – reads use Dragonboat's ReadIndex protocol to guarantee
+	//                the follower has applied all committed entries before
+	//                responding.  Linearizable, but adds a network round-trip.
+	//
+	// Default: "strong".
+	FollowerReadMode string `mapstructure:"followerReadMode" yaml:"followerReadMode"`
 }
 
 func Load(path string) (*Config, error) {

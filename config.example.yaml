@@ -54,3 +54,11 @@ storage:
     # Size of the active in-memory table in Megabytes.
     # Increase this value for write-heavy workloads. (Must be at least 1MB).
     inMemoryTableSizeMb: 64
+
+raft:
+  nodeId: 1
+  clusterId: 1
+  listenAddress: "0.0.0.0:50005"
+  dataPath: "./raft-data"
+  initialMembers:
+    1: "0.0.0.0:50005"

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"io"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/futureq-io/futureq/internal/app"
+	"github.com/futureq-io/futureq/internal/raft"
 	"github.com/futureq-io/futureq/internal/repository"
 	pb "github.com/futureq-io/futureq/proto/go"
 )
@@ -24,6 +26,10 @@ type ProducerHandler struct {
 }
 
 // NewProducerHandler returns an initialised ProducerHandler.
+// In Raft mode the handler never writes directly to Pebble; all writes go
+// through SyncPropose → state machine → EventRepository.StoreWithBatch.
+// The local eventRepo is therefore only initialised in non-Raft (single-node)
+// mode to avoid an unnecessary Pebble read and a redundant lastID counter.
 func NewProducerHandler(logger *zap.Logger) *ProducerHandler {
 	bucketSize := app.A.Config().Storage.TimeBucketSize
 
@@ -32,12 +38,14 @@ func NewProducerHandler(logger *zap.Logger) *ProducerHandler {
 		timeBucketSize: bucketSize,
 	}
 
-	eventRepo, err := repository.NewEventRepository(app.A.Pebble.DB)
-	if err != nil {
-		ph.logger.Fatal("failed to init event repo", zap.Error(err))
+	// Only needed in non-Raft (standalone) mode.
+	if app.A.NodeHost == nil {
+		eventRepo, err := repository.NewEventRepository(app.A.Pebble.DB, ph.logger)
+		if err != nil {
+			ph.logger.Fatal("failed to init event repo", zap.Error(err))
+		}
+		ph.eventRepo = eventRepo
 	}
-
-	ph.eventRepo = eventRepo
 
 	return ph
 }
@@ -76,7 +84,39 @@ func (ph *ProducerHandler) PublishStream(stream grpc.BidiStreamingServer[pb.Stre
 
 		executeAt := req.ExecuteAtUnixMs
 		bucket := calculateBucket(executeAt, ph.timeBucketSize)
-		err = ph.eventRepo.Store(bucket, data)
+		
+		if app.A.NodeHost != nil {
+			shardID := app.A.Config().Raft.ClusterID
+			leaderID, _, valid, errL := app.A.NodeHost.GetLeaderID(shardID)
+			if errL != nil || !valid || leaderID != app.A.Config().Raft.NodeID {
+				ph.logger.Warn("rejecting write, not the leader", zap.Uint64("leader", leaderID), zap.Error(errL))
+				if err := stream.Send(&pb.StreamPublishAck{
+					MessageId:    req.MessageId,
+					Success:      false,
+					ErrorMessage: "node is not the cluster leader",
+				}); err != nil {
+					ph.logger.Error("failed to send ack", zap.Error(err))
+				}
+				continue
+			}
+
+			cmd := &raft.Command{
+				Type:   raft.StoreEventCmd,
+				Bucket: bucket,
+				Data:   data,
+			}
+			cmdBytes, err2 := raft.MarshalCommand(cmd)
+			if err2 != nil {
+				err = err2
+			} else {
+				ctx, cancel := context.WithTimeout(stream.Context(), 5*time.Second)
+				session := app.A.NodeHost.GetNoOPSession(app.A.Config().Raft.ClusterID)
+				_, err = app.A.NodeHost.SyncPropose(ctx, session, cmdBytes)
+				cancel()
+			}
+		} else {
+			err = ph.eventRepo.Store(bucket, data)
+		}
 
 		ack := &pb.StreamPublishAck{
 			MessageId: req.MessageId,

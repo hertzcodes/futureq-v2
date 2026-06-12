@@ -10,9 +10,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/futureq-io/futureq/internal/config"
-	"github.com/futureq-io/futureq/internal/storage"
+	"github.com/lni/dragonboat/v4"
+	raftconfig "github.com/lni/dragonboat/v4/config"
 	"go.uber.org/zap"
+
+	"github.com/futureq-io/futureq/internal/config"
+	"github.com/futureq-io/futureq/internal/raft"
+	"github.com/futureq-io/futureq/internal/storage"
 )
 
 const gracefulShutdownTimeout = 10 * time.Second
@@ -20,9 +24,10 @@ const gracefulShutdownTimeout = 10 * time.Second
 var A *App
 
 type App struct {
-	cfg    *config.Config
-	Pebble *storage.Pebble
-	Ctx    context.Context
+	cfg      *config.Config
+	Pebble   *storage.Pebble
+	NodeHost *dragonboat.NodeHost
+	Ctx      context.Context
 	// ShutCtx is the 10-second shutdown window context. It is populated by
 	// WithGracefulShutdown immediately before a.Ctx is cancelled, so any
 	// goroutine watching a.Ctx.Done() can safely read ShutCtx.
@@ -46,6 +51,45 @@ func Init(cfg *config.Config, logger *zap.Logger) (*App, error) {
 	}
 
 	a.Pebble = pebble
+
+	if cfg.Raft.NodeID > 0 {
+		rttMs := cfg.Raft.RTTMillisecond
+		if rttMs == 0 {
+			rttMs = 200 // sane default: calibrates heartbeat and election timeouts
+		}
+
+		nhc := raftconfig.NodeHostConfig{
+			WALDir:         cfg.Raft.DataPath,
+			NodeHostDir:    cfg.Raft.DataPath,
+			RTTMillisecond: rttMs,
+			RaftAddress:    cfg.Raft.ListenAddress,
+		}
+
+		nh, err := dragonboat.NewNodeHost(nhc)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create dragonboat nodehost: %w", err)
+		}
+		a.NodeHost = nh
+
+		rc := raftconfig.Config{
+			ReplicaID:          cfg.Raft.NodeID,
+			ShardID:            cfg.Raft.ClusterID,
+			ElectionRTT:        10,
+			HeartbeatRTT:       1,
+			CheckQuorum:        true,
+			SnapshotEntries:    10000,
+			CompactionOverhead: 5000,
+		}
+
+		members := make(map[uint64]dragonboat.Target)
+		for k, v := range cfg.Raft.InitialMembers {
+			members[k] = dragonboat.Target(v)
+		}
+
+		if err := nh.StartOnDiskReplica(members, false, raft.NewEventStateMachineFactory(pebble.DB, logger), rc); err != nil {
+			return nil, fmt.Errorf("failed to start raft cluster: %w", err)
+		}
+	}
 
 	A = a
 
@@ -102,6 +146,16 @@ func (a *App) WithGracefulShutdown() error {
 		a.Logger.Info("graceful shutdown completed before timeout")
 	case <-shutCtx.Done():
 		a.Logger.Warn("graceful shutdown timeout exceeded, forcing exit")
+	}
+
+	if a.NodeHost != nil {
+		a.Logger.Info("closing Dragonboat NodeHost...")
+		a.NodeHost.Close()
+		a.Logger.Info("Dragonboat NodeHost closed successfully")
+	}
+
+	if err := a.Pebble.DB.Flush(); err != nil {
+		a.Logger.Error("failed to flush pebble on shutdown", zap.Error(err))
 	}
 
 	// 4. Safely close Pebble DB.
