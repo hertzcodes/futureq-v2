@@ -27,6 +27,7 @@ var defaultConfig = Config{
 	},
 
 	Raft: Raft{
+		Enabled:            false,
 		NodeID:             1,
 		ClusterID:          1,
 		ListenAddress:      "0.0.0.0:50005",

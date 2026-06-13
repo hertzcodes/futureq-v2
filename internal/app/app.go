@@ -52,16 +52,12 @@ func Init(cfg *config.Config, logger *zap.Logger) (*App, error) {
 
 	a.Pebble = pebble
 
-	if cfg.Raft.NodeID > 0 {
-		rttMs := cfg.Raft.RTTMillisecond
-		if rttMs == 0 {
-			rttMs = 200 // sane default: calibrates heartbeat and election timeouts
-		}
+	if cfg.Raft.Enabled {
 
 		nhc := raftconfig.NodeHostConfig{
 			WALDir:         cfg.Raft.DataPath,
 			NodeHostDir:    cfg.Raft.DataPath,
-			RTTMillisecond: rttMs,
+			RTTMillisecond: cfg.Raft.RTTMillisecond,
 			RaftAddress:    cfg.Raft.ListenAddress,
 		}
 
@@ -69,6 +65,7 @@ func Init(cfg *config.Config, logger *zap.Logger) (*App, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create dragonboat nodehost: %w", err)
 		}
+
 		a.NodeHost = nh
 
 		rc := raftconfig.Config{

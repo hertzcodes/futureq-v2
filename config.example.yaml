@@ -56,6 +56,7 @@ storage:
     inMemoryTableSizeMb: 64
 
 raft:
+  enabled: false
   # Unique integer ID of the current node in the Raft cluster (e.g. 1, 2, 3).
   # Use '0' (or omit the raft section entirely) to run the node in standalone
   # mode without Raft replication (writing directly to Pebble).

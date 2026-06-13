@@ -45,6 +45,7 @@ type Pebble struct {
 }
 
 type Raft struct {
+	Enabled        bool              `mapstructure:"enabled" yaml:"enabled"`
 	NodeID         uint64            `mapstructure:"nodeId" yaml:"nodeId"`
 	ClusterID      uint64            `mapstructure:"clusterId" yaml:"clusterId"`
 	ListenAddress  string            `mapstructure:"listenAddress" yaml:"listenAddress"`
@@ -133,6 +134,10 @@ func (c *Config) validateRaft() error {
 
 	if c.Raft.CompactionOverhead == 0 {
 		return fmt.Errorf("raft's compaction overhead cannot be zero")
+	}
+
+	if c.Raft.RTTMillisecond == 0 {
+		return fmt.Errorf("raft's rtt millisecond cannot be zero")
 	}
 
 	return nil
