@@ -4,7 +4,7 @@
 // 	protoc        v7.35.0
 // source: consumer.proto
 
-package proto
+package _go
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -21,10 +21,13 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// QueueMessage is pushed from the server to the consumer on the Subscribe stream.
+// delivery_tag is an opaque server-assigned token (the raw Pebble key) that the
+// client must echo back in AckRequest.delivery_tag to acknowledge this message.
 type QueueMessage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	MessageId     string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
 	Payload       []byte                 `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"`
+	DeliveryTag   []byte                 `protobuf:"bytes,3,opt,name=delivery_tag,json=deliveryTag,proto3" json:"delivery_tag,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -59,13 +62,6 @@ func (*QueueMessage) Descriptor() ([]byte, []int) {
 	return file_consumer_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *QueueMessage) GetMessageId() string {
-	if x != nil {
-		return x.MessageId
-	}
-	return ""
-}
-
 func (x *QueueMessage) GetPayload() []byte {
 	if x != nil {
 		return x.Payload
@@ -73,10 +69,20 @@ func (x *QueueMessage) GetPayload() []byte {
 	return nil
 }
 
+func (x *QueueMessage) GetDeliveryTag() []byte {
+	if x != nil {
+		return x.DeliveryTag
+	}
+	return nil
+}
+
+// AckRequest is sent by the consumer back to the server to acknowledge a message.
+// Set success=true and echo the delivery_tag from the corresponding QueueMessage
+// to confirm delivery. Set success=false to NACK (the message will be redelivered).
 type AckRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	MessageId     string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
 	Success       bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
+	DeliveryTag   []byte                 `protobuf:"bytes,3,opt,name=delivery_tag,json=deliveryTag,proto3" json:"delivery_tag,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -111,13 +117,6 @@ func (*AckRequest) Descriptor() ([]byte, []int) {
 	return file_consumer_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *AckRequest) GetMessageId() string {
-	if x != nil {
-		return x.MessageId
-	}
-	return ""
-}
-
 func (x *AckRequest) GetSuccess() bool {
 	if x != nil {
 		return x.Success
@@ -125,22 +124,27 @@ func (x *AckRequest) GetSuccess() bool {
 	return false
 }
 
+func (x *AckRequest) GetDeliveryTag() []byte {
+	if x != nil {
+		return x.DeliveryTag
+	}
+	return nil
+}
+
 var File_consumer_proto protoreflect.FileDescriptor
 
 const file_consumer_proto_rawDesc = "" +
 	"\n" +
-	"\x0econsumer.proto\x12\afutureq\"G\n" +
-	"\fQueueMessage\x12\x1d\n" +
+	"\x0econsumer.proto\x12\afutureq\"K\n" +
+	"\fQueueMessage\x12\x18\n" +
+	"\apayload\x18\x02 \x01(\fR\apayload\x12!\n" +
+	"\fdelivery_tag\x18\x03 \x01(\fR\vdeliveryTag\"I\n" +
 	"\n" +
-	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x18\n" +
-	"\apayload\x18\x02 \x01(\fR\apayload\"E\n" +
-	"\n" +
-	"AckRequest\x12\x1d\n" +
-	"\n" +
-	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x18\n" +
-	"\asuccess\x18\x02 \x01(\bR\asuccess2N\n" +
+	"AckRequest\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\x12!\n" +
+	"\fdelivery_tag\x18\x03 \x01(\fR\vdeliveryTag2N\n" +
 	"\x0fFutureQConsumer\x12;\n" +
-	"\tSubscribe\x12\x13.futureq.AckRequest\x1a\x15.futureq.QueueMessage(\x010\x01B%Z#github.com/futureq-io/futureq/protob\x06proto3"
+	"\tSubscribe\x12\x13.futureq.AckRequest\x1a\x15.futureq.QueueMessage(\x010\x01B(Z&github.com/futureq-io/futureq/proto/gob\x06proto3"
 
 var (
 	file_consumer_proto_rawDescOnce sync.Once

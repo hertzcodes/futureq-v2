@@ -4,7 +4,7 @@
 // - protoc             v7.35.0
 // source: producer.proto
 
-package proto
+package _go
 
 import (
 	context "context"

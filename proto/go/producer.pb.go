@@ -4,7 +4,7 @@
 // 	protoc        v7.35.0
 // source: producer.proto
 
-package proto
+package _go
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -23,7 +23,6 @@ const (
 
 type StreamPublishRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
-	MessageId       string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
 	Topic           string                 `protobuf:"bytes,2,opt,name=topic,proto3" json:"topic,omitempty"`
 	Payload         []byte                 `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`
 	ExecuteAtUnixMs int64                  `protobuf:"varint,4,opt,name=execute_at_unix_ms,json=executeAtUnixMs,proto3" json:"execute_at_unix_ms,omitempty"`
@@ -61,13 +60,6 @@ func (*StreamPublishRequest) Descriptor() ([]byte, []int) {
 	return file_producer_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *StreamPublishRequest) GetMessageId() string {
-	if x != nil {
-		return x.MessageId
-	}
-	return ""
-}
-
 func (x *StreamPublishRequest) GetTopic() string {
 	if x != nil {
 		return x.Topic
@@ -91,7 +83,6 @@ func (x *StreamPublishRequest) GetExecuteAtUnixMs() int64 {
 
 type StreamPublishAck struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	MessageId     string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
 	Success       bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
 	ErrorMessage  string                 `protobuf:"bytes,3,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -128,13 +119,6 @@ func (*StreamPublishAck) Descriptor() ([]byte, []int) {
 	return file_producer_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *StreamPublishAck) GetMessageId() string {
-	if x != nil {
-		return x.MessageId
-	}
-	return ""
-}
-
 func (x *StreamPublishAck) GetSuccess() bool {
 	if x != nil {
 		return x.Success
@@ -153,20 +137,16 @@ var File_producer_proto protoreflect.FileDescriptor
 
 const file_producer_proto_rawDesc = "" +
 	"\n" +
-	"\x0eproducer.proto\x12\afutureq\"\x92\x01\n" +
-	"\x14StreamPublishRequest\x12\x1d\n" +
-	"\n" +
-	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x14\n" +
+	"\x0eproducer.proto\x12\afutureq\"s\n" +
+	"\x14StreamPublishRequest\x12\x14\n" +
 	"\x05topic\x18\x02 \x01(\tR\x05topic\x12\x18\n" +
 	"\apayload\x18\x03 \x01(\fR\apayload\x12+\n" +
-	"\x12execute_at_unix_ms\x18\x04 \x01(\x03R\x0fexecuteAtUnixMs\"p\n" +
-	"\x10StreamPublishAck\x12\x1d\n" +
-	"\n" +
-	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x18\n" +
+	"\x12execute_at_unix_ms\x18\x04 \x01(\x03R\x0fexecuteAtUnixMs\"Q\n" +
+	"\x10StreamPublishAck\x12\x18\n" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12#\n" +
 	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage2`\n" +
 	"\x0fFutureQProducer\x12M\n" +
-	"\rPublishStream\x12\x1d.futureq.StreamPublishRequest\x1a\x19.futureq.StreamPublishAck(\x010\x01B%Z#github.com/futureq-io/futureq/protob\x06proto3"
+	"\rPublishStream\x12\x1d.futureq.StreamPublishRequest\x1a\x19.futureq.StreamPublishAck(\x010\x01B(Z&github.com/futureq-io/futureq/proto/gob\x06proto3"
 
 var (
 	file_producer_proto_rawDescOnce sync.Once
