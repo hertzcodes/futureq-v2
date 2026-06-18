@@ -21,6 +21,8 @@ server:
   listen: "0.0.0.0:8443"
   maxConns: 10
   timeout: 5s
+  maxRecvSizeKb: 100
+  maxSendSizeKb: 100
 
 observability:
   logger:
@@ -101,11 +103,6 @@ raft:
   compactionOverHead: 5000
 
 consumer:
-  # Maximum number of simultaneous consumer Subscribe streams the server will
-  # accept. Connections beyond this limit are rejected immediately with a
-  # ResourceExhausted gRPC status code.
-  maxConns: 100
-
   # How long (in milliseconds) the dispatcher sleeps between Pebble scan passes
   # when no ready messages are found. Lower values reduce delivery latency at
   # the cost of slightly more Pebble iterator overhead.

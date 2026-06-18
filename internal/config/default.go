@@ -4,9 +4,11 @@ import "time"
 
 var defaultConfig = Config{
 	Server: Server{
-		Listen:   "0.0.0.0:8443",
-		MaxConns: 10,
-		Timeout:  5 * time.Second,
+		Listen:        "0.0.0.0:8443",
+		MaxConns:      10,
+		Timeout:       5 * time.Second,
+		MaxSendSizeKB: 100,
+		MaxRecvSizeKB: 100,
 	},
 
 	Observability: Observability{
@@ -39,7 +41,6 @@ var defaultConfig = Config{
 	},
 
 	Consumer: Consumer{
-		MaxConns:               100,
 		DispatchPollIntervalMs: 50,
 		DeleteBatchIntervalMs:  500,
 	},

@@ -19,9 +19,11 @@ type Config struct {
 }
 
 type Server struct {
-	Listen   string        `mapstructure:"listen" yaml:"listen"`
-	MaxConns uint32        `mapstructure:"maxConns" yaml:"maxConns"`
-	Timeout  time.Duration `mapstructure:"timeout" yaml:"timeout"`
+	Listen        string        `mapstructure:"listen" yaml:"listen"`
+	MaxConns      uint32        `mapstructure:"maxConns" yaml:"maxConns"`
+	Timeout       time.Duration `mapstructure:"timeout" yaml:"timeout"`
+	MaxRecvSizeKB int           `mapstructure:"maxRecvSizeKb" yaml:"maxRecvSizeKb"`
+	MaxSendSizeKB int           `mapstructure:"maxSendSizeKb" yaml:"maxSendSizeKb"`
 }
 
 type Observability struct {
@@ -65,10 +67,6 @@ type Raft struct {
 
 // Consumer holds configuration for the message dispatch subsystem.
 type Consumer struct {
-	// MaxConns is the maximum number of simultaneous consumer Subscribe streams.
-	// Connections beyond this limit are rejected with ResourceExhausted.
-	MaxConns uint32 `mapstructure:"maxConns" yaml:"maxConns"`
-
 	// DispatchPollIntervalMs is how long the dispatcher sleeps between scan
 	// passes when no ready messages were found. Shorter values reduce delivery
 	// latency at the cost of more Pebble iterator overhead. Default: 50ms.
