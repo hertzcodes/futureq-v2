@@ -56,6 +56,7 @@ func testReplication(t *testing.T, disableWAL bool) {
 				},
 			},
 			Raft: config.Raft{
+				Enabled:       true,
 				NodeID:        uint64(i),
 				ClusterID:     1,
 				ListenAddress: fmt.Sprintf("0.0.0.0:%d", int(base)+i),
@@ -65,6 +66,9 @@ func testReplication(t *testing.T, disableWAL bool) {
 					2: fmt.Sprintf("0.0.0.0:%d", int(base)+2),
 					3: fmt.Sprintf("0.0.0.0:%d", int(base)+3),
 				},
+				RTTMillisecond:     200,
+				SnapshotEntries:    10000,
+				CompactionOverhead: 5000,
 			},
 		}
 
