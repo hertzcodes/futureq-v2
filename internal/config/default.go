@@ -34,8 +34,13 @@ var defaultConfig = Config{
 		DataPath:           "./raft-data",
 		InitialMembers:     map[uint64]string{1: "0.0.0.0:50005"},
 		RTTMillisecond:     200,
-		FollowerReadMode:   "strong",
 		SnapshotEntries:    10000,
 		CompactionOverhead: 5000,
+	},
+
+	Consumer: Consumer{
+		MaxConns:               100,
+		DispatchPollIntervalMs: 50,
+		DeleteBatchIntervalMs:  500,
 	},
 }

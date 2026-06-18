@@ -4,14 +4,22 @@ package futureq;
 
 option go_package = "github.com/futureq-io/futureq/proto";
 
+// QueueMessage is pushed from the server to the consumer on the Subscribe stream.
+// delivery_tag is an opaque server-assigned token (the raw Pebble key) that the
+// client must echo back in AckRequest.delivery_tag to acknowledge this message.
 message QueueMessage {
     string message_id = 1;
     bytes payload = 2;
+    bytes delivery_tag = 3;
 }
 
+// AckRequest is sent by the consumer back to the server to acknowledge a message.
+// Set success=true and echo the delivery_tag from the corresponding QueueMessage
+// to confirm delivery. Set success=false to NACK (the message will be redelivered).
 message AckRequest {
     string message_id = 1;
     bool success = 2;
+    bytes delivery_tag = 3;
 }
 
 service FutureQConsumer {

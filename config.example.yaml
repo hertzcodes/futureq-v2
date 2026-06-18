@@ -86,16 +86,6 @@ raft:
   #   faster leader failover and speed up the replication loop.
   rttMillisecond: 200
 
-  # Controls the read consistency model when querying follower nodes:
-  #
-  # - "strong": Follower uses the ReadIndex protocol to check with the leader,
-  #             guaranteeing linearizable, strongly consistent reads.
-  #             Adds 1 network RTT.
-  # - "eventual": Follower reads directly from its local Pebble replica state.
-  #               Saves a network RTT, but reads can be slightly stale (lagged
-  #               by up to a heartbeat window).
-  followerReadMode: "strong"
-
   # Number of committed Raft log entries to write before a new database
   # snapshot is created and old log files are deleted (compacted) from disk.
   #
@@ -109,3 +99,20 @@ raft:
   # a buffer so that if a follower falls slightly behind, the leader can
   # sync it using incremental log updates rather than a full snapshot stream.
   compactionOverHead: 5000
+
+consumer:
+  # Maximum number of simultaneous consumer Subscribe streams the server will
+  # accept. Connections beyond this limit are rejected immediately with a
+  # ResourceExhausted gRPC status code.
+  maxConns: 100
+
+  # How long (in milliseconds) the dispatcher sleeps between Pebble scan passes
+  # when no ready messages are found. Lower values reduce delivery latency at
+  # the cost of slightly more Pebble iterator overhead.
+  dispatchPollIntervalMs: 50
+
+  # How often (in milliseconds) the batched deleter flushes acknowledged message
+  # keys to Pebble as a single batch. Batching amortises the LSM tombstone write
+  # cost; individual key deletions after every ACK would be far more expensive.
+  deleteBatchIntervalMs: 500
+

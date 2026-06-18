@@ -15,6 +15,7 @@ type Config struct {
 	Observability Observability `mapstructure:"observability" yaml:"observability"`
 	Storage       Storage       `mapstructure:"storage" yaml:"storage"`
 	Raft          Raft          `mapstructure:"raft" yaml:"raft"`
+	Consumer      Consumer      `mapstructure:"consumer" yaml:"consumer"`
 }
 
 type Server struct {
@@ -58,21 +59,26 @@ type Raft struct {
 	// higher network overhead.  Default: 200.
 	RTTMillisecond uint64 `mapstructure:"rttMillisecond" yaml:"rttMillisecond"`
 
-	// FollowerReadMode controls how follower nodes serve read requests.
-	//
-	//   "eventual" – reads are served from local Pebble state, which may lag
-	//                behind the leader by up to one heartbeat interval
-	//                (RTTMillisecond * HeartbeatRTT ms).  Lower latency, but
-	//                the client may observe slightly stale data.
-	//
-	//   "strong"   – reads use Dragonboat's ReadIndex protocol to guarantee
-	//                the follower has applied all committed entries before
-	//                responding.  Linearizable, but adds a network round-trip.
-	//
-	// Default: "strong".
-	FollowerReadMode   string `mapstructure:"followerReadMode" yaml:"followerReadMode"`
 	SnapshotEntries    uint64 `mapstructure:"snapShotEntries" yaml:"snapShotEntries"`
 	CompactionOverhead uint64 `mapstructure:"compactionOverHead" yaml:"compactionOverHead"`
+}
+
+// Consumer holds configuration for the message dispatch subsystem.
+type Consumer struct {
+	// MaxConns is the maximum number of simultaneous consumer Subscribe streams.
+	// Connections beyond this limit are rejected with ResourceExhausted.
+	MaxConns uint32 `mapstructure:"maxConns" yaml:"maxConns"`
+
+	// DispatchPollIntervalMs is how long the dispatcher sleeps between scan
+	// passes when no ready messages were found. Shorter values reduce delivery
+	// latency at the cost of more Pebble iterator overhead. Default: 50ms.
+	DispatchPollIntervalMs uint64 `mapstructure:"dispatchPollIntervalMs" yaml:"dispatchPollIntervalMs"`
+
+	// DeleteBatchIntervalMs is how often the batched deleter flushes accumulated
+	// acknowledged-message keys to Pebble. Batching amortises the LSM
+	// tombstone cost. Default: 500ms.
+	// This should be higher than TimeBucketSize to have a good impact.
+	DeleteBatchIntervalMs uint64 `mapstructure:"deleteBatchIntervalMs" yaml:"deleteBatchIntervalMs"`
 }
 
 func Load(path string) (*Config, error) {
