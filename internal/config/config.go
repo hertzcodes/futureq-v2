@@ -152,6 +152,12 @@ func (c *Config) validateStorage() error {
 		c.Storage.TimeBucketSize = 0
 	}
 
+	if !c.Raft.Enabled {
+		if c.Storage.Pebble.DisableWAL {
+			return fmt.Errorf("WAL can not be disabled on single node setup without raft")
+		}
+	}
+
 	return nil
 }
 
