@@ -3,6 +3,8 @@ package handlers
 import (
 	"testing"
 	"time"
+
+	"github.com/futureq-io/futureq/pkg/utils"
 )
 
 func TestCalculateBucket(t *testing.T) {
@@ -64,7 +66,7 @@ func TestCalculateBucket(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := calculateBucket(tt.executeAt, tt.bucketSize)
+			got := utils.CalculateBucket(tt.executeAt, tt.bucketSize)
 			if got != tt.expected {
 				t.Errorf("calculateBucket(%d, %v) = %d; want %d", tt.executeAt, tt.bucketSize, got, tt.expected)
 			}

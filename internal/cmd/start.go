@@ -5,6 +5,7 @@ package cmd
 
 import (
 	stdLogger "log"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -12,6 +13,7 @@ import (
 	"github.com/futureq-io/futureq/internal/api/grpc"
 	"github.com/futureq-io/futureq/internal/app"
 	"github.com/futureq-io/futureq/internal/config"
+	"github.com/futureq-io/futureq/internal/dispatcher"
 	"github.com/futureq-io/futureq/pkg/log"
 )
 
@@ -38,7 +40,25 @@ func startRun(_ *cobra.Command, _ []string) {
 		logger.Fatal("failed to init app", zap.Error(err))
 	}
 
-	grpc.New(cfg.Server, logger).Listen().WaitForShutdown(a.Ctx)
+	wakeCh := make(chan struct{}, 1)
+	hub := dispatcher.NewHub(logger, wakeCh)
+	deleter := dispatcher.NewDeleter(a.Pebble.DB, time.Duration(cfg.Consumer.DeleteBatchIntervalMs)*time.Millisecond, logger)
+	disp := dispatcher.NewDispatcher(a.Pebble.DB, hub, time.Duration(cfg.Consumer.DispatchPollIntervalMs)*time.Millisecond, wakeCh, logger)
+	deleter.OnDelete = disp.RemoveInFlight
+
+	a.RegisterComponentWithShutdown()
+	go func() {
+		defer a.ComponentShutdownDone()
+		deleter.Run(a.Ctx)
+	}()
+
+	a.RegisterComponentWithShutdown()
+	go func() {
+		defer a.ComponentShutdownDone()
+		disp.Run(a.Ctx)
+	}()
+
+	grpc.New(cfg.Server, hub, deleter, logger).Listen().WaitForShutdown(a.Ctx)
 
 	if err := a.WithGracefulShutdown(); err != nil {
 		logger.Fatal("failed to graceful shutdown", zap.Error(err))

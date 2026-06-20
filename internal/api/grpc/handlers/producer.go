@@ -14,6 +14,7 @@ import (
 	"github.com/futureq-io/futureq/internal/app"
 	"github.com/futureq-io/futureq/internal/raft"
 	"github.com/futureq-io/futureq/internal/repository"
+	"github.com/futureq-io/futureq/pkg/utils"
 	pb "github.com/futureq-io/futureq/proto/go"
 )
 
@@ -69,10 +70,9 @@ func (ph *ProducerHandler) PublishStream(stream grpc.BidiStreamingServer[pb.Stre
 
 		data, err := proto.Marshal(req)
 		if err != nil {
-			ph.logger.Error("failed to marshal request", zap.String("message_id", req.MessageId), zap.Error(err))
+			ph.logger.Error("failed to marshal request", zap.String("topic", req.GetTopic()), zap.Error(err))
 
 			if err := stream.Send(&pb.StreamPublishAck{
-				MessageId:    req.MessageId,
 				Success:      false,
 				ErrorMessage: "internal error: failed to serialize message",
 			}); err != nil {
@@ -83,15 +83,13 @@ func (ph *ProducerHandler) PublishStream(stream grpc.BidiStreamingServer[pb.Stre
 		}
 
 		executeAt := req.ExecuteAtUnixMs
-		bucket := calculateBucket(executeAt, ph.timeBucketSize)
-		
+		bucket := utils.CalculateBucket(executeAt, ph.timeBucketSize)
 		if app.A.NodeHost != nil {
 			shardID := app.A.Config().Raft.ClusterID
 			leaderID, _, valid, errL := app.A.NodeHost.GetLeaderID(shardID)
 			if errL != nil || !valid || leaderID != app.A.Config().Raft.NodeID {
 				ph.logger.Warn("rejecting write, not the leader", zap.Uint64("leader", leaderID), zap.Error(errL))
 				if err := stream.Send(&pb.StreamPublishAck{
-					MessageId:    req.MessageId,
 					Success:      false,
 					ErrorMessage: "node is not the cluster leader",
 				}); err != nil {
@@ -118,12 +116,10 @@ func (ph *ProducerHandler) PublishStream(stream grpc.BidiStreamingServer[pb.Stre
 			err = ph.eventRepo.Store(bucket, data)
 		}
 
-		ack := &pb.StreamPublishAck{
-			MessageId: req.MessageId,
-		}
+		ack := &pb.StreamPublishAck{}
 
 		if err != nil {
-			ph.logger.Error("failed to store event", zap.String("message_id", req.MessageId), zap.Error(err))
+			ph.logger.Error("failed to store event", zap.String("topic", req.GetTopic()), zap.Error(err))
 			ack.Success = false
 			ack.ErrorMessage = "failed to persist message to database"
 		} else {
@@ -131,22 +127,8 @@ func (ph *ProducerHandler) PublishStream(stream grpc.BidiStreamingServer[pb.Stre
 		}
 
 		if err := stream.Send(ack); err != nil {
-			ph.logger.Error("failed to send ack", zap.String("message_id", req.MessageId), zap.Error(err))
+			ph.logger.Error("failed to send ack", zap.String("topic", req.GetTopic()), zap.Error(err))
 			return status.Errorf(codes.Internal, "failed to send ack: %v", err)
 		}
 	}
-}
-
-func calculateBucket(executeAt int64, bucketSize time.Duration) uint64 {
-	if executeAt <= 0 {
-		return 0
-	}
-
-	bucketSizeMs := bucketSize.Milliseconds()
-	if bucketSizeMs > 0 {
-		k := (executeAt + bucketSizeMs - 1) / bucketSizeMs
-		return uint64(k * bucketSizeMs)
-	}
-
-	return uint64(executeAt)
 }

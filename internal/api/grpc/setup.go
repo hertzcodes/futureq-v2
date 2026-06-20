@@ -8,6 +8,7 @@ import (
 	"github.com/futureq-io/futureq/internal/api/grpc/handlers"
 	"github.com/futureq-io/futureq/internal/app"
 	"github.com/futureq-io/futureq/internal/config"
+	"github.com/futureq-io/futureq/internal/dispatcher"
 	proto "github.com/futureq-io/futureq/proto/go"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -23,12 +24,15 @@ type Server struct {
 
 // New creates a fully configured gRPC server and registers all service
 // handlers. No network socket is opened yet; call Listen to do that.
-func New(cfg config.Server, logger *zap.Logger) *Server {
+func New(cfg config.Server, hub *dispatcher.Hub, deleter *dispatcher.Deleter, logger *zap.Logger) *Server {
 	log := logger.Named("grpc_server")
 
 	srv := grpc.NewServer(
-		// Honour the operator-supplied connection ceiling.
+		// Honour the operator-supplied connection ceiling for the whole server.
 		grpc.MaxConcurrentStreams(cfg.MaxConns),
+
+		grpc.MaxRecvMsgSize(cfg.MaxRecvSizeKB*1024), // KB
+		grpc.MaxSendMsgSize(cfg.MaxSendSizeKB*1024), // KB
 
 		// Keepalive enforcement: drop clients that ignore pings.
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
@@ -48,7 +52,7 @@ func New(cfg config.Server, logger *zap.Logger) *Server {
 
 	// Register service implementations.
 	proto.RegisterFutureQProducerServer(srv, handlers.NewProducerHandler(log))
-	proto.RegisterFutureQConsumerServer(srv, handlers.NewConsumerHandler(log))
+	proto.RegisterFutureQConsumerServer(srv, handlers.NewConsumerHandler(log, hub, deleter))
 
 	return &Server{
 		srv:    srv,
