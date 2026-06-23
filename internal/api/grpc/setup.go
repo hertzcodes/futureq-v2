@@ -9,7 +9,7 @@ import (
 	"github.com/futureq-io/futureq/internal/app"
 	"github.com/futureq-io/futureq/internal/config"
 	"github.com/futureq-io/futureq/internal/dispatcher"
-	proto "github.com/futureq-io/futureq/proto/go"
+	pb "github.com/futureq-io/protocol/proto/go"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -51,8 +51,8 @@ func New(cfg config.Server, hub *dispatcher.Hub, deleter *dispatcher.Deleter, lo
 	)
 
 	// Register service implementations.
-	proto.RegisterFutureQProducerServer(srv, handlers.NewProducerHandler(log))
-	proto.RegisterFutureQConsumerServer(srv, handlers.NewConsumerHandler(log, hub, deleter))
+	pb.RegisterFutureQProducerServer(srv, handlers.NewProducerHandler(log))
+	pb.RegisterFutureQConsumerServer(srv, handlers.NewConsumerHandler(log, hub, deleter))
 
 	return &Server{
 		srv:    srv,

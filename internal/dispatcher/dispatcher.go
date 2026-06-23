@@ -9,7 +9,7 @@ import (
 	"github.com/cockroachdb/pebble/v2"
 	"github.com/futureq-io/futureq/internal/app"
 	"github.com/futureq-io/futureq/pkg/utils"
-	pb "github.com/futureq-io/futureq/proto/go"
+	pb "github.com/futureq-io/protocol/proto/go"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )

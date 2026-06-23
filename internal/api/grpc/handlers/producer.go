@@ -15,7 +15,7 @@ import (
 	"github.com/futureq-io/futureq/internal/raft"
 	"github.com/futureq-io/futureq/internal/repository"
 	"github.com/futureq-io/futureq/pkg/utils"
-	pb "github.com/futureq-io/futureq/proto/go"
+	pb "github.com/futureq-io/protocol/proto/go"
 )
 
 // ProducerHandler implements proto.FutureQProducerServer.

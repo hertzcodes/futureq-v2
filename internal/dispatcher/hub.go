@@ -3,7 +3,7 @@ package dispatcher
 import (
 	"sync"
 
-	pb "github.com/futureq-io/futureq/proto/go"
+	pb "github.com/futureq-io/protocol/proto/go"
 	"go.uber.org/zap"
 )
 

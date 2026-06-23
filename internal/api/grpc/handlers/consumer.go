@@ -7,7 +7,7 @@ import (
 
 	"github.com/futureq-io/futureq/internal/app"
 	"github.com/futureq-io/futureq/internal/dispatcher"
-	proto "github.com/futureq-io/futureq/proto/go"
+	pb "github.com/futureq-io/protocol/proto/go"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -17,7 +17,7 @@ import (
 
 // ConsumerHandler implements proto.FutureQConsumerServer.
 type ConsumerHandler struct {
-	proto.UnimplementedFutureQConsumerServer
+	pb.UnimplementedFutureQConsumerServer
 	logger  *zap.Logger
 	hub     *dispatcher.Hub
 	deleter *dispatcher.Deleter
@@ -35,7 +35,7 @@ func NewConsumerHandler(logger *zap.Logger, hub *dispatcher.Hub, deleter *dispat
 // Subscribe handles a bidirectional stream where the server pushes
 // QueueMessage items to the client and the client replies with AckRequest
 // messages to confirm (or reject) each delivery.
-func (h *ConsumerHandler) Subscribe(stream grpc.BidiStreamingServer[proto.AckRequest, proto.QueueMessage]) error {
+func (h *ConsumerHandler) Subscribe(stream grpc.BidiStreamingServer[pb.AckRequest, pb.QueueMessage]) error {
 	if app.A.NodeHost != nil {
 		shardID := app.A.Config().Raft.ClusterID
 		leaderID, _, valid, err := app.A.NodeHost.GetLeaderID(shardID)
@@ -46,7 +46,7 @@ func (h *ConsumerHandler) Subscribe(stream grpc.BidiStreamingServer[proto.AckReq
 	}
 
 	consumerID := uuid.New().String()
-	ch := make(chan *proto.QueueMessage, 1024)
+	ch := make(chan *pb.QueueMessage, 1024)
 	h.hub.Register(consumerID, ch)
 	defer h.hub.Unregister(consumerID)
 
