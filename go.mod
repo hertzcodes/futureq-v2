@@ -4,7 +4,7 @@ go 1.26.2
 
 require (
 	github.com/cockroachdb/pebble/v2 v2.1.6
-	github.com/futureq-io/protocol/proto/go v0.0.0
+	github.com/futureq-io/protocol/proto/go v0.0.1
 	github.com/google/uuid v1.6.0
 	github.com/lni/dragonboat/v4 v4.0.0-20250723143628-076c7f6497dc
 	github.com/spf13/cobra v1.0.0
