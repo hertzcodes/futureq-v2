@@ -43,5 +43,13 @@ var defaultConfig = Config{
 	Consumer: Consumer{
 		DispatchPollIntervalMs: 50,
 		DeleteBatchIntervalMs:  500,
+		InFlightTimeoutMs:      5000,
+		TTLJanitorIntervalMs:   60000,
+	},
+
+	Cluster: Cluster{
+		GossipListenAddress:  "0.0.0.0:7946",
+		GossipJoinPeers:      []string{},
+		MetricsListenAddress: "0.0.0.0:9090",
 	},
 }

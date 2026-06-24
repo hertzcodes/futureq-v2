@@ -16,6 +16,7 @@ type Config struct {
 	Storage       Storage       `mapstructure:"storage" yaml:"storage"`
 	Raft          Raft          `mapstructure:"raft" yaml:"raft"`
 	Consumer      Consumer      `mapstructure:"consumer" yaml:"consumer"`
+	Cluster       Cluster       `mapstructure:"cluster" yaml:"cluster"`
 }
 
 type Server struct {
@@ -73,10 +74,31 @@ type Consumer struct {
 	DispatchPollIntervalMs uint64 `mapstructure:"dispatchPollIntervalMs" yaml:"dispatchPollIntervalMs"`
 
 	// DeleteBatchIntervalMs is how often the batched deleter flushes accumulated
-	// acknowledged-message keys to Pebble. Batching amortises the LSM
-	// tombstone cost. Default: 500ms.
-	// This should be higher than TimeBucketSize to have a good impact.
+	// acknowledged-message keys via Raft. Default: 500ms.
 	DeleteBatchIntervalMs uint64 `mapstructure:"deleteBatchIntervalMs" yaml:"deleteBatchIntervalMs"`
+
+	// InFlightTimeoutMs is the duration after which a dispatched-but-unacknowledged
+	// message is considered abandoned and eligible for re-dispatch. Default: 5000ms.
+	InFlightTimeoutMs uint64 `mapstructure:"inFlightTimeoutMs" yaml:"inFlightTimeoutMs"`
+
+	// TTLJanitorIntervalMs is how often the TTL janitor performs a full Pebble
+	// scan to remove expired messages that were never consumed. Default: 60000ms.
+	TTLJanitorIntervalMs uint64 `mapstructure:"ttlJanitorIntervalMs" yaml:"ttlJanitorIntervalMs"`
+}
+
+// Cluster holds configuration for cluster membership and observability.
+type Cluster struct {
+	// GossipListenAddress is the address the memberlist gossip agent binds to.
+	// Format: "host:port". Default: "0.0.0.0:7946".
+	GossipListenAddress string `mapstructure:"gossipListenAddress" yaml:"gossipListenAddress"`
+
+	// GossipJoinPeers is the list of seed peer addresses used when this node
+	// joins an existing cluster. Leave empty for a single-node bootstrap.
+	GossipJoinPeers []string `mapstructure:"gossipJoinPeers" yaml:"gossipJoinPeers"`
+
+	// MetricsListenAddress is the address for the Prometheus /metrics HTTP
+	// endpoint. Set to "" to disable metrics. Default: "0.0.0.0:9090".
+	MetricsListenAddress string `mapstructure:"metricsListenAddress" yaml:"metricsListenAddress"`
 }
 
 func Load(path string) (*Config, error) {

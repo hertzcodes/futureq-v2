@@ -113,3 +113,24 @@ consumer:
   # cost; individual key deletions after every ACK would be far more expensive.
   deleteBatchIntervalMs: 500
 
+  # How long (in milliseconds) a dispatched-but-unacknowledged message is
+  # considered abandoned and eligible for re-dispatch.
+  inFlightTimeoutMs: 5000
+
+  # How often (in milliseconds) the TTL janitor performs a full Pebble scan
+  # to remove expired messages that were never consumed.
+  ttlJanitorIntervalMs: 60000
+
+cluster:
+  # The address the memberlist gossip agent binds to.
+  # Format: "host:port".
+  gossipListenAddress: "0.0.0.0:7946"
+
+  # List of seed peer addresses used when this node joins an existing cluster.
+  # Leave empty for a single-node bootstrap.
+  gossipJoinPeers: []
+
+  # The address for the Prometheus /metrics HTTP endpoint. Set to "" to disable metrics.
+  metricsListenAddress: "0.0.0.0:9090"
+
+
