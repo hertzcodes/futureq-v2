@@ -77,10 +77,7 @@ func (ph *ProducerHandler) processBatch(ctx context.Context, batch *pb.PublishBa
 		return &pb.PublishBatchAck{}, nil
 	}
 
-	ackLevel := batch.AckLevel
-	if ackLevel == pb.AckLevel_ACK_LEVEL_UNSPECIFIED {
-		ackLevel = pb.AckLevel_ACK_LEVEL_QUORUM
-	}
+	ackLevel := batch.GetAckLevel()
 
 	nowMs := time.Now().UnixMilli()
 
@@ -175,7 +172,7 @@ func (ph *ProducerHandler) processRaftBatch(
 	var proposeErr error
 
 	switch ackLevel {
-	case pb.AckLevel_ACK_LEVEL_LEADER:
+	case pb.AckLevel_ACK_LEVEL_NO_ACK:
 		session := app.A.NodeHost.GetNoOPSession(shardID)
 		_, proposeErr = app.A.NodeHost.Propose(session, cmdBytes, 5*time.Second)
 	default:
