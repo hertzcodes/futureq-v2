@@ -11,15 +11,15 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/cockroachdb/pebble/v2"
 	"github.com/futureq-io/futureq/internal/app"
 	"github.com/futureq-io/futureq/internal/metrics"
 	"github.com/futureq-io/futureq/internal/raft"
-	"github.com/futureq-io/futureq/internal/storagepb"
 	"github.com/futureq-io/futureq/pkg/utils"
 	pb "github.com/futureq-io/protocol/proto/go"
+	storagepb "github.com/futureq-io/protocol/proto/go/storage"
+	"github.com/gogo/protobuf/proto"
 )
 
 var errBatchSave = errors.New("failed to save batch")
@@ -109,27 +109,19 @@ func (ph *ProducerHandler) processBatch(ctx context.Context, batch *pb.PublishBa
 func (ph *ProducerHandler) marshalMessages(
 	batch *pb.PublishBatch,
 	nowMs int64,
-	fn func(bucket, topicHash uint64, data []byte) error,
+	fn func(data *storagepb.StoredMessage) error,
 ) error {
 	for _, msg := range batch.Messages {
-		fireAtMs := nowMs + msg.DelayMs
-		bucket := utils.CalculateBucket(fireAtMs, ph.timeBucketSize)
-		topicHash := utils.TopicHash(msg.Topic)
-
 		stored := &storagepb.StoredMessage{
 			Topic:            msg.Topic,
 			Payload:          msg.Payload,
 			EnqueuedAtUnixMs: nowMs,
 			DelayMs:          msg.DelayMs,
 			TtlMs:            msg.TtlMs,
+			Indexes:          msg.Indexes,
 		}
 
-		data, err := proto.Marshal(stored)
-		if err != nil {
-			return fmt.Errorf("failed to marshal message for topic %q: %w", msg.Topic, err)
-		}
-
-		if err := fn(bucket, topicHash, data); err != nil {
+		if err := fn(stored); err != nil {
 			return err
 		}
 	}
@@ -152,12 +144,28 @@ func (ph *ProducerHandler) processRaftBatch(
 	}
 
 	items := make([]raft.StoreBatchItem, 0, len(batch.Messages))
-	if err := ph.marshalMessages(batch, nowMs, func(bucket, topicHash uint64, data []byte) error {
-		items = append(items, raft.StoreBatchItem{
-			Bucket:    bucket,
-			TopicHash: topicHash,
-			Value:     data,
-		})
+	if err := ph.marshalMessages(batch, nowMs, func(data *storagepb.StoredMessage) error {
+		dataBytes, err := proto.Marshal(data)
+		if err != nil {
+			return fmt.Errorf("failed to marshal message: %w", err)
+		}
+
+		raftItem := raft.StoreBatchItem{
+			Bucket:    utils.CalculateBucket(data.EnqueuedAtUnixMs+data.DelayMs, app.A.Config().Storage.TimeBucketSize),
+			TopicHash: utils.TopicHash(data.Topic),
+			Msg:       dataBytes,
+		}
+
+		for _, idx := range data.GetIndexes() {
+			idxBytes, err := proto.Marshal(idx)
+			if err != nil {
+				return fmt.Errorf("failed to marshal index: %w", err)
+			}
+
+			raftItem.Indexes = append(raftItem.Indexes, idxBytes)
+		}
+
+		items = append(items, raftItem)
 		return nil
 	}); err != nil {
 		return fmt.Errorf("failed to build store batch: %w", err)
@@ -198,8 +206,8 @@ func (ph *ProducerHandler) processStandaloneBatch(batch *pb.PublishBatch, nowMs 
 	b := app.A.Pebble.DB.NewBatch()
 	defer func() { _ = b.Close() }()
 
-	if err := ph.marshalMessages(batch, nowMs, func(bucket, topicHash uint64, data []byte) error {
-		_, err := app.A.Repositories.Events.StoreWithBatch(b, bucket, topicHash, data)
+	if err := ph.marshalMessages(batch, nowMs, func(data *storagepb.StoredMessage) error {
+		_, err := app.A.Repositories.Events.StoreWithBatch(b, data)
 		return err
 	}); err != nil {
 		return err

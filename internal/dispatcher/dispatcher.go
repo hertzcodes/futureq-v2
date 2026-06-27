@@ -10,9 +10,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/futureq-io/futureq/internal/app"
-	"github.com/futureq-io/futureq/internal/storagepb"
+
 	"github.com/futureq-io/futureq/pkg/utils"
 	pb "github.com/futureq-io/protocol/proto/go"
+	storagepb "github.com/futureq-io/protocol/proto/go/storage"
 )
 
 // inFlightEntry tracks a single message that has been sent to a consumer but

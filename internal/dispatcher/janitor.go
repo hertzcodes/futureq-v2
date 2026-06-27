@@ -8,7 +8,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/futureq-io/futureq/internal/storagepb"
+	storagepb "github.com/futureq-io/protocol/proto/go/storage"
 	"github.com/futureq-io/futureq/pkg/utils"
 )
 

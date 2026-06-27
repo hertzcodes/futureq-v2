@@ -28,9 +28,10 @@ type StoreBatchItem struct {
 	Bucket uint64
 	// TopicHash is xxhash64(topic).
 	TopicHash uint64
-	// Value is the already-serialised storagepb.StoredMessage proto bytes.
+	Indexes   [][]byte
+	// Msg is the already-serialised storagepb.StoredMessage proto bytes.
 	// This slice aliases the original command buffer — do not mutate.
-	Value []byte
+	Msg []byte
 }
 
 // MarshalStoreBatchCmd serialises a list of items into a compact binary command.
@@ -40,18 +41,25 @@ type StoreBatchItem struct {
 //	[0]      CommandType   (1 byte = 0)
 //	[1..8]   count         (uint64 big-endian)
 //	for each item:
-//	  [n..n+7]   bucket     (uint64 big-endian)
-//	  [n+8..n+15] topicHash (uint64 big-endian)
-//	  [n+16..n+19] valLen   (uint32 big-endian)
-//	  [n+20..]   value      (valLen bytes — serialised StoredMessage)
+//	  [n..n+7]   bucket      (uint64 big-endian)
+//	  [n+8..n+15] topicHash  (uint64 big-endian)
+//	  [n+16..n+17] numIdx    (uint16 big-endian)
+//	  for each index:
+//	    [m..m+1]   idxLen    (uint16 big-endian)
+//	    [m+2..]    idxData   (idxLen bytes)
+//	  [x..x+3]   valLen      (uint32 big-endian)
+//	  [x+4..]    value       (valLen bytes — serialised StoredMessage)
 //
-// The Value slices in items are appended directly with a single copy — there is
-// no intermediate StoreBatchEntry or double-copy on the write hot path.
+// The Msg and Indexes slices in items are appended directly with a single copy.
 func MarshalStoreBatchCmd(items []StoreBatchItem) ([]byte, error) {
 	// Pre-calculate total size to do a single allocation.
 	size := 1 + 8 // cmdType + count
 	for _, it := range items {
-		size += 8 + 8 + 4 + len(it.Value) // bucket + topicHash + valLen + value
+		size += 8 + 8 + 2 // bucket + topicHash + numIdx
+		for _, idx := range it.Indexes {
+			size += 2 + len(idx) // idxLen + data
+		}
+		size += 4 + len(it.Msg) // valLen + value
 	}
 
 	out := make([]byte, size)
@@ -64,17 +72,27 @@ func MarshalStoreBatchCmd(items []StoreBatchItem) ([]byte, error) {
 		pos += 8
 		binary.BigEndian.PutUint64(out[pos:pos+8], it.TopicHash)
 		pos += 8
-		binary.BigEndian.PutUint32(out[pos:pos+4], uint32(len(it.Value)))
+		
+		binary.BigEndian.PutUint16(out[pos:pos+2], uint16(len(it.Indexes)))
+		pos += 2
+		for _, idx := range it.Indexes {
+			binary.BigEndian.PutUint16(out[pos:pos+2], uint16(len(idx)))
+			pos += 2
+			copy(out[pos:], idx)
+			pos += len(idx)
+		}
+
+		binary.BigEndian.PutUint32(out[pos:pos+4], uint32(len(it.Msg)))
 		pos += 4
-		copy(out[pos:], it.Value)
-		pos += len(it.Value)
+		copy(out[pos:], it.Msg)
+		pos += len(it.Msg)
 	}
 
 	return out, nil
 }
 
 // UnmarshalStoreBatchCmd deserialises a StoreBatchCmd payload.
-// The Value slices in the returned items alias the input data slice — they are
+// The Msg and Indexes slices in the returned items alias the input data slice — they are
 // zero-copy views into the Dragonboat log buffer. Callers must not mutate them.
 func UnmarshalStoreBatchCmd(data []byte) ([]StoreBatchItem, error) {
 	if len(data) < 1+8 {
@@ -89,13 +107,35 @@ func UnmarshalStoreBatchCmd(data []byte) ([]StoreBatchItem, error) {
 
 	pos := 9
 	for i := uint64(0); i < count; i++ {
-		if pos+8+8+4 > len(data) {
+		if pos+8+8+2 > len(data) {
 			return nil, fmt.Errorf("raft: StoreBatchCmd truncated at item %d header", i)
 		}
 		bucket := binary.BigEndian.Uint64(data[pos : pos+8])
 		pos += 8
 		topicHash := binary.BigEndian.Uint64(data[pos : pos+8])
 		pos += 8
+		
+		numIdx := int(binary.BigEndian.Uint16(data[pos : pos+2]))
+		pos += 2
+		
+		indexes := make([][]byte, 0, numIdx)
+		for j := 0; j < numIdx; j++ {
+			if pos+2 > len(data) {
+				return nil, fmt.Errorf("raft: StoreBatchCmd truncated at item %d index %d len", i, j)
+			}
+			idxLen := int(binary.BigEndian.Uint16(data[pos : pos+2]))
+			pos += 2
+			
+			if pos+idxLen > len(data) {
+				return nil, fmt.Errorf("raft: StoreBatchCmd truncated at item %d index %d data", i, j)
+			}
+			indexes = append(indexes, data[pos : pos+idxLen])
+			pos += idxLen
+		}
+
+		if pos+4 > len(data) {
+			return nil, fmt.Errorf("raft: StoreBatchCmd truncated at item %d valLen", i)
+		}
 		valLen := int(binary.BigEndian.Uint32(data[pos : pos+4]))
 		pos += 4
 
@@ -109,7 +149,8 @@ func UnmarshalStoreBatchCmd(data []byte) ([]StoreBatchItem, error) {
 		items = append(items, StoreBatchItem{
 			Bucket:    bucket,
 			TopicHash: topicHash,
-			Value:     value,
+			Indexes:   indexes,
+			Msg:       value,
 		})
 	}
 

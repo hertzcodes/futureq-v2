@@ -84,7 +84,7 @@ func (s *EventStateMachine) applyEntry(batch *pebble.Batch, cmd []byte) (statema
 			// lets the repository assign the authoritative monotonic key.
 			// This is identical to the standalone write path — same ID counter,
 			// same key schema, no extra serialisation step.
-			if _, err := s.repo.StoreWithBatch(batch, it.Bucket, it.TopicHash, it.Value); err != nil {
+			if _, err := s.repo.StoreRawWithBatch(batch, it.Bucket, it.TopicHash, it.Indexes ,it.Msg); err != nil {
 				log.Printf("raft: StoreRawWithBatch failed: %v", err)
 				return statemachine.Result{Value: 0}, nil
 			}

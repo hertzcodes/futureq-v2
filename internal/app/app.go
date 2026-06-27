@@ -190,7 +190,7 @@ func (a *App) WithGracefulShutdown() error {
 }
 
 func (a *App) WithRepositories() error {
-	eventRepo, err := repository.NewEventRepository(a.Pebble.DB, a.Logger)
+	eventRepo, err := repository.NewEventRepository(a.Pebble.DB, a.Logger, a.cfg.Storage.TimeBucketSize)
 	if err != nil {
 		return fmt.Errorf("failed to init event repo: %w", err)
 	}
@@ -199,4 +199,3 @@ func (a *App) WithRepositories() error {
 
 	return nil
 }
-
