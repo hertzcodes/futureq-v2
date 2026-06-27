@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+// Package storagepb defines the internal Pebble value format for stored messages.
+// This proto is NOT part of the public client API — it is only used between the
+// broker's write path and the dispatcher/state machine.
+package storagepb;
+
+option go_package = "github.com/futureq-io/futureq/internal/storagepb";
+
+// StoredMessage is the value written to Pebble for each queued message.
+// The corresponding key is a 24-byte composite: bucket | topic_hash | event_id.
+message StoredMessage {
+    // topic is the full topic name (kept in the value for populating consumer
+    // QueueMessage.topic without a separate lookup).
+    string topic          = 1;
+
+    // payload is the opaque application data.
+    bytes  payload        = 2;
+
+    // enqueued_at_unix_ms is the broker wall-clock time (Unix ms) when the
+    // message was first received. Used for TTL checks and consumer metadata.
+    int64  enqueued_at_unix_ms = 3;
+
+    // delay_ms is the original delay requested by the producer. Combined with
+    // enqueued_at_unix_ms to compute fire_at = enqueued_at + delay_ms.
+    int64  delay_ms       = 4;
+
+    // ttl_ms is the message time-to-live in milliseconds from enqueued_at.
+    // 0 means no expiry.
+    int64  ttl_ms         = 5;
+}

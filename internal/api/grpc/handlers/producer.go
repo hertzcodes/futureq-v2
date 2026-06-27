@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"time"
 
@@ -11,26 +13,30 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/cockroachdb/pebble/v2"
 	"github.com/futureq-io/futureq/internal/app"
+	"github.com/futureq-io/futureq/internal/metrics"
 	"github.com/futureq-io/futureq/internal/raft"
-	"github.com/futureq-io/futureq/internal/repository"
+	"github.com/futureq-io/futureq/internal/storagepb"
 	"github.com/futureq-io/futureq/pkg/utils"
 	pb "github.com/futureq-io/protocol/proto/go"
 )
 
-// ProducerHandler implements proto.FutureQProducerServer.
+var (
+	errBatchSave = errors.New("failed to save batch")
+)
+
+// ProducerHandler implements pb.FutureQProducerServer.
 type ProducerHandler struct {
 	pb.UnimplementedFutureQProducerServer
 	logger         *zap.Logger
-	eventRepo      *repository.EventRepository
 	timeBucketSize time.Duration
 }
 
 // NewProducerHandler returns an initialised ProducerHandler.
 // In Raft mode the handler never writes directly to Pebble; all writes go
-// through SyncPropose → state machine → EventRepository.StoreWithBatch.
-// The local eventRepo is therefore only initialised in non-Raft (single-node)
-// mode to avoid an unnecessary Pebble read and a redundant lastID counter.
+// through SyncPropose → state machine → Pebble.
+// The local eventRepo is only initialised in non-Raft (standalone) mode.
 func NewProducerHandler(logger *zap.Logger) *ProducerHandler {
 	bucketSize := app.A.Config().Storage.TimeBucketSize
 
@@ -39,96 +45,204 @@ func NewProducerHandler(logger *zap.Logger) *ProducerHandler {
 		timeBucketSize: bucketSize,
 	}
 
-	// Only needed in non-Raft (standalone) mode.
-	if app.A.NodeHost == nil {
-		eventRepo, err := repository.NewEventRepository(app.A.Pebble.DB, ph.logger)
-		if err != nil {
-			ph.logger.Fatal("failed to init event repo", zap.Error(err))
-		}
-		ph.eventRepo = eventRepo
-	}
-
 	return ph
 }
 
-// PublishStream handles a bidirectional stream where clients send
-// StreamPublishRequest messages and receive StreamPublishAck responses.
+// PublishStream handles a bidirectional stream where clients send PublishBatch
+// frames and receive PublishBatchAck responses.
 //
-// The client sends a batch of scheduled messages; the server acknowledges
-// each one individually so the client can track per-message delivery.
-func (ph *ProducerHandler) PublishStream(stream grpc.BidiStreamingServer[pb.StreamPublishRequest, pb.StreamPublishAck]) error {
+// Each batch is written atomically as a single Raft log entry (in Raft mode)
+// or a single Pebble batch (standalone mode). The ack_level field controls
+// whether the broker waits for quorum commit (ACK_LEVEL_QUORUM, default) or
+// returns immediately after leader writes (ACK_LEVEL_LEADER).
+func (ph *ProducerHandler) PublishStream(stream grpc.BidiStreamingServer[pb.PublishBatch, pb.PublishBatchAck]) error {
 	for {
-		req, err := stream.Recv()
+		batch, err := stream.Recv()
 		if err == io.EOF {
 			return nil
 		}
-
 		if err != nil {
 			ph.logger.Error("failed to receive from stream", zap.Error(err))
 			return status.Errorf(codes.Internal, "stream read error: %v", err)
 		}
 
-		data, err := proto.Marshal(req)
-		if err != nil {
-			ph.logger.Error("failed to marshal request", zap.String("topic", req.GetTopic()), zap.Error(err))
-
-			if err := stream.Send(&pb.StreamPublishAck{
-				Success:      false,
-				ErrorMessage: "internal error: failed to serialize message",
-			}); err != nil {
-				ph.logger.Error("failed to send ack", zap.Error(err))
-			}
-
-			continue
+		ackResp, streamErr := ph.processBatch(stream.Context(), batch)
+		if streamErr != nil {
+			return streamErr
 		}
 
-		executeAt := req.ExecuteAtUnixMs
-		bucket := utils.CalculateBucket(executeAt, ph.timeBucketSize)
-		if app.A.NodeHost != nil {
-			shardID := app.A.Config().Raft.ClusterID
-			leaderID, _, valid, errL := app.A.NodeHost.GetLeaderID(shardID)
-			if errL != nil || !valid || leaderID != app.A.Config().Raft.NodeID {
-				ph.logger.Warn("rejecting write, not the leader", zap.Uint64("leader", leaderID), zap.Error(errL))
-				if err := stream.Send(&pb.StreamPublishAck{
-					Success:      false,
-					ErrorMessage: "node is not the cluster leader",
-				}); err != nil {
-					ph.logger.Error("failed to send ack", zap.Error(err))
-				}
-				continue
-			}
-
-			cmd := &raft.Command{
-				Type:   raft.StoreEventCmd,
-				Bucket: bucket,
-				Data:   data,
-			}
-			cmdBytes, err2 := raft.MarshalCommand(cmd)
-			if err2 != nil {
-				err = err2
-			} else {
-				ctx, cancel := context.WithTimeout(stream.Context(), 5*time.Second)
-				session := app.A.NodeHost.GetNoOPSession(app.A.Config().Raft.ClusterID)
-				_, err = app.A.NodeHost.SyncPropose(ctx, session, cmdBytes)
-				cancel()
-			}
-		} else {
-			err = ph.eventRepo.Store(bucket, data)
-		}
-
-		ack := &pb.StreamPublishAck{}
-
-		if err != nil {
-			ph.logger.Error("failed to store event", zap.String("topic", req.GetTopic()), zap.Error(err))
-			ack.Success = false
-			ack.ErrorMessage = "failed to persist message to database"
-		} else {
-			ack.Success = true
-		}
-
-		if err := stream.Send(ack); err != nil {
-			ph.logger.Error("failed to send ack", zap.String("topic", req.GetTopic()), zap.Error(err))
+		if err := stream.Send(ackResp); err != nil {
+			ph.logger.Error("failed to send PublishBatchAck", zap.Error(err))
 			return status.Errorf(codes.Internal, "failed to send ack: %v", err)
 		}
 	}
+}
+
+// processBatch handles one PublishBatch frame and returns the corresponding ack.
+func (ph *ProducerHandler) processBatch(ctx context.Context, batch *pb.PublishBatch) (*pb.PublishBatchAck, error) {
+	if len(batch.Messages) == 0 {
+		return &pb.PublishBatchAck{}, nil
+	}
+
+	ackLevel := batch.AckLevel
+	if ackLevel == pb.AckLevel_ACK_LEVEL_UNSPECIFIED {
+		ackLevel = pb.AckLevel_ACK_LEVEL_QUORUM
+	}
+
+	nowMs := time.Now().UnixMilli()
+
+	if app.A.NodeHost != nil {
+		if err := ph.processRaftBatch(ctx, batch, nowMs, ackLevel); err != nil {
+			return &pb.PublishBatchAck{Success: false}, err
+		}
+	} else {
+		ph.processStandaloneBatch(batch, nowMs)
+	}
+
+	metrics.PublishBatchSize.WithLabelValues("").Observe(float64(len(batch.Messages)))
+
+	return &pb.PublishBatchAck{Success: true}, nil
+}
+
+func (ph *ProducerHandler) processRaftBatch(
+	ctx context.Context,
+	batch *pb.PublishBatch,
+	nowMs int64,
+	ackLevel pb.AckLevel,
+) error {
+	shardID := app.A.Config().Raft.ClusterID
+
+	// Only the leader may propose.
+	leaderID, _, valid, errL := app.A.NodeHost.GetLeaderID(shardID)
+	if errL != nil || !valid || leaderID != app.A.Config().Raft.NodeID {
+		return errors.New("node is not the cluster leader")
+	}
+
+	// Marshal each StoredMessage once. The resulting bytes travel through the
+	// Raft log and are written directly to Pebble by the state machine — no
+	// second serialisation step.
+	items, err := ph.buildStoreBatchItems(batch, nowMs)
+	if err != nil {
+		return fmt.Errorf("failed to build store batch: %w", err)
+	}
+
+	cmdBytes, err := raft.MarshalStoreBatchCmd(items)
+	if err != nil {
+		return fmt.Errorf("failed to marshal StoreBatchCmd: %w", err)
+	}
+
+	start := time.Now()
+	var proposeErr error
+
+	switch ackLevel {
+	case pb.AckLevel_ACK_LEVEL_LEADER:
+		session := app.A.NodeHost.GetNoOPSession(shardID)
+		_, proposeErr = app.A.NodeHost.Propose(session, cmdBytes, 5*time.Second)
+
+	default:
+		propCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		session := app.A.NodeHost.GetNoOPSession(shardID)
+		_, proposeErr = app.A.NodeHost.SyncPropose(propCtx, session, cmdBytes)
+		cancel()
+	}
+
+	elapsed := float64(time.Since(start).Milliseconds())
+	metrics.RaftProposeDurationMs.WithLabelValues(ackLevel.String()).Observe(elapsed)
+
+	if proposeErr != nil {
+		return fmt.Errorf("failed to do raft proposal: %w", proposeErr)
+	}
+
+	return nil
+}
+
+// processStandaloneBatch writes the batch directly to Pebble (non-Raft mode).
+func (ph *ProducerHandler) processStandaloneBatch(
+	batch *pb.PublishBatch,
+	nowMs int64,
+) error {
+	b := app.A.Pebble.DB.NewBatch()
+	defer func() { _ = b.Close() }()
+
+	for _, msg := range batch.Messages {
+		fireAtMs := nowMs + msg.DelayMs
+		bucket := utils.CalculateBucket(fireAtMs, ph.timeBucketSize)
+		topicHash := utils.TopicHash(msg.Topic)
+
+		stored := &storagepb.StoredMessage{
+			Topic:            msg.Topic,
+			Payload:          msg.Payload,
+			EnqueuedAtUnixMs: nowMs,
+			DelayMs:          msg.DelayMs,
+			TtlMs:            msg.TtlMs,
+		}
+
+		data, err := proto.Marshal(stored)
+		if err != nil {
+			return fmt.Errorf("failed to marshal message: %w", err)
+		}
+
+		// TODO: we might need the handled key later.
+		_, err = app.A.Repositories.Events.StoreWithBatch(b, bucket, topicHash, data)
+		if err != nil {
+			ph.logger.Error("failed to add message to batch",
+				zap.String("topic", msg.Topic), zap.Error(err))
+			return fmt.Errorf("failed to store the key in batch: %w", err)
+		}
+	}
+
+	if err := b.Commit(pebble.Sync); err != nil {
+		ph.logger.Error("failed to commit standalone batch", zap.Error(err))
+		return errBatchSave
+	}
+
+	return nil
+}
+
+// buildStoreBatchItems builds the list of StoreBatchItems that will be embedded
+// in a StoreBatchCmd Raft log entry.
+//
+// Each message is serialised to proto bytes exactly once here. Those bytes
+// travel verbatim through the Raft log and are written directly to Pebble by
+// the state machine via StoreRawWithBatch — no second serialisation step occurs.
+//
+// The key (bucket + topicHash) is computed here so the state machine only needs
+// to atomically increment the event ID counter and concatenate the three parts.
+func (ph *ProducerHandler) buildStoreBatchItems(
+	batch *pb.PublishBatch,
+	nowMs int64,
+) ([]raft.StoreBatchItem, error) {
+	items := make([]raft.StoreBatchItem, 0, len(batch.Messages))
+
+	for _, msg := range batch.Messages {
+		fireAtMs := nowMs + msg.DelayMs
+		bucket := utils.CalculateBucket(fireAtMs, ph.timeBucketSize)
+		topicHash := utils.TopicHash(msg.Topic)
+
+		stored := &storagepb.StoredMessage{
+			Topic:            msg.Topic,
+			Payload:          msg.Payload,
+			EnqueuedAtUnixMs: nowMs,
+			DelayMs:          msg.DelayMs,
+			TtlMs:            msg.TtlMs,
+		}
+
+		// Single proto.Marshal call per message — bytes reused directly by
+		// MarshalStoreBatchCmd (one copy into the command buffer) and then by
+		// StoreRawWithBatch in the state machine (written to Pebble as-is).
+		data, err := proto.Marshal(stored)
+		if err != nil {
+			ph.logger.Error("failed to marshal StoredMessage",
+				zap.String("topic", msg.GetTopic()), zap.Error(err))
+			return nil, fmt.Errorf("failed to marshal message for topic %q: %w", msg.Topic, err)
+		}
+
+		items = append(items, raft.StoreBatchItem{
+			Bucket:    bucket,
+			TopicHash: topicHash,
+			Value:     data,
+		})
+	}
+
+	return items, nil
 }

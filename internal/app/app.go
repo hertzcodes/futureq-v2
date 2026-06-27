@@ -16,12 +16,17 @@ import (
 
 	"github.com/futureq-io/futureq/internal/config"
 	"github.com/futureq-io/futureq/internal/raft"
+	"github.com/futureq-io/futureq/internal/repository"
 	"github.com/futureq-io/futureq/internal/storage"
 )
 
 const gracefulShutdownTimeout = 10 * time.Second
 
 var A *App
+
+type Repositories struct {
+	Events *repository.EventRepository
+}
 
 type App struct {
 	cfg      *config.Config
@@ -31,12 +36,16 @@ type App struct {
 	// ShutCtx is the 10-second shutdown window context. It is populated by
 	// WithGracefulShutdown immediately before a.Ctx is cancelled, so any
 	// goroutine watching a.Ctx.Done() can safely read ShutCtx.
-	ShutCtx context.Context
-	cancel  context.CancelCauseFunc
-	Logger  *zap.Logger
-	wg      sync.WaitGroup
+	ShutCtx      context.Context
+	Repositories Repositories
+	cancel       context.CancelCauseFunc
+	Logger       *zap.Logger
+	wg           sync.WaitGroup
 }
 
+// Init initialises the application: sets up Pebble storage and creates the App
+// singleton. Call WithRepositories() next to load the EventRepository, then
+// StartRaft() if clustering is enabled.
 func Init(cfg *config.Config, logger *zap.Logger) (*App, error) {
 	a := &App{
 		cfg:    cfg,
@@ -51,46 +60,58 @@ func Init(cfg *config.Config, logger *zap.Logger) (*App, error) {
 	}
 
 	a.Pebble = pebble
-
-	if cfg.Raft.Enabled {
-
-		nhc := raftconfig.NodeHostConfig{
-			WALDir:         cfg.Raft.DataPath,
-			NodeHostDir:    cfg.Raft.DataPath,
-			RTTMillisecond: cfg.Raft.RTTMillisecond,
-			RaftAddress:    cfg.Raft.ListenAddress,
-		}
-
-		nh, err := dragonboat.NewNodeHost(nhc)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create dragonboat nodehost: %w", err)
-		}
-
-		a.NodeHost = nh
-
-		rc := raftconfig.Config{
-			ReplicaID:          cfg.Raft.NodeID,
-			ShardID:            cfg.Raft.ClusterID,
-			ElectionRTT:        10,
-			HeartbeatRTT:       1,
-			CheckQuorum:        true,
-			SnapshotEntries:    cfg.Raft.SnapshotEntries,
-			CompactionOverhead: cfg.Raft.CompactionOverhead,
-		}
-
-		members := make(map[uint64]dragonboat.Target)
-		for k, v := range cfg.Raft.InitialMembers {
-			members[k] = dragonboat.Target(v)
-		}
-
-		if err := nh.StartOnDiskReplica(members, false, raft.NewEventStateMachineFactory(pebble.DB, logger), rc); err != nil {
-			return nil, fmt.Errorf("failed to start raft cluster: %w", err)
-		}
-	}
-
 	A = a
 
 	return a, nil
+}
+
+// StartRaft starts the Dragonboat NodeHost and the on-disk Raft replica.
+//
+// Must be called after WithRepositories() so the EventRepository is fully
+// initialised before the state machine factory captures it.
+//
+// onDeleteKeys is called by the state machine after a DeleteBatchCmd is applied.
+// Wire this to Dispatcher.RemoveInFlightBatch in start.go.
+func (a *App) StartRaft(onDeleteKeys func(keys [][]byte)) error {
+	cfg := a.cfg
+
+	nhc := raftconfig.NodeHostConfig{
+		WALDir:         cfg.Raft.DataPath,
+		NodeHostDir:    cfg.Raft.DataPath,
+		RTTMillisecond: cfg.Raft.RTTMillisecond,
+		RaftAddress:    cfg.Raft.ListenAddress,
+	}
+
+	nh, err := dragonboat.NewNodeHost(nhc)
+	if err != nil {
+		return fmt.Errorf("failed to create dragonboat nodehost: %w", err)
+	}
+
+	a.NodeHost = nh
+
+	rc := raftconfig.Config{
+		ReplicaID:          cfg.Raft.NodeID,
+		ShardID:            cfg.Raft.ClusterID,
+		ElectionRTT:        10,
+		HeartbeatRTT:       1,
+		CheckQuorum:        true,
+		SnapshotEntries:    cfg.Raft.SnapshotEntries,
+		CompactionOverhead: cfg.Raft.CompactionOverhead,
+	}
+
+	members := make(map[uint64]dragonboat.Target)
+	for k, v := range cfg.Raft.InitialMembers {
+		members[k] = dragonboat.Target(v)
+	}
+
+	// Pass the fully-initialised EventRepository so the state machine uses the
+	// same monotonic ID counter and key schema as the standalone write path.
+	factory := raft.NewEventStateMachineFactory(a.Pebble.DB, a.Repositories.Events, onDeleteKeys, a.Logger)
+	if err := nh.StartOnDiskReplica(members, false, factory, rc); err != nil {
+		return fmt.Errorf("failed to start raft cluster: %w", err)
+	}
+
+	return nil
 }
 
 // Config returns the application configuration.
@@ -167,3 +188,15 @@ func (a *App) WithGracefulShutdown() error {
 
 	return nil
 }
+
+func (a *App) WithRepositories() error {
+	eventRepo, err := repository.NewEventRepository(a.Pebble.DB, a.Logger)
+	if err != nil {
+		return fmt.Errorf("failed to init event repo: %w", err)
+	}
+
+	a.Repositories.Events = eventRepo
+
+	return nil
+}
+

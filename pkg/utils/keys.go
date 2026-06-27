@@ -22,12 +22,17 @@ func TopicHash(topic string) uint64 {
 // CalculateBucket maps a Unix-millisecond timestamp to its bucket index.
 // The bucket is the time divided by bucketSize. If bucketSize is zero,
 // the raw millisecond timestamp is used as the bucket (maximum precision).
+// Negative timestamps (invalid for scheduled messages) return bucket 0.
 func CalculateBucket(unixMs int64, bucketSize time.Duration) uint64 {
+	if unixMs <= 0 {
+		return 0
+	}
 	if bucketSize <= 0 {
 		return uint64(unixMs)
 	}
 	return uint64(unixMs) / uint64(bucketSize.Milliseconds())
 }
+
 
 // EventKey constructs the 24-byte Pebble key for a stored message.
 //

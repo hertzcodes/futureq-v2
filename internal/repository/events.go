@@ -7,10 +7,13 @@ import (
 
 	"github.com/cockroachdb/pebble/v2"
 	"go.uber.org/zap"
+
+	"github.com/futureq-io/futureq/pkg/utils"
 )
 
 var eventsLastIDKey = []byte("metadata/event-repo/last-id")
 
+// EventRepository manages the monotonic event ID counter stored in Pebble.
 type EventRepository struct {
 	db     *pebble.DB
 	logger *zap.Logger
@@ -38,41 +41,26 @@ func NewEventRepository(db *pebble.DB, logger *zap.Logger) (*EventRepository, er
 	return repo, nil
 }
 
-func (er *EventRepository) Store(bucket uint64, data []byte) error {
-	b := er.db.NewBatch()
-	defer func() {
-		if err := b.Close(); err != nil {
-			if er.logger != nil {
-				er.logger.Error("failed to close batch", zap.Error(err))
-			}
-		}
-	}()
-
-	if err := er.StoreWithBatch(b, bucket, data); err != nil {
-		return err
-	}
-
-	return b.Commit(pebble.Sync)
-}
-
-func (er *EventRepository) StoreWithBatch(b *pebble.Batch, bucket uint64, data []byte) error {
+// StoreWithBatch marshals msg and adds it to an existing Pebble batch.
+// It returns the generated 24-byte Pebble key for the caller to use as a delivery_tag.
+func (er *EventRepository) StoreWithBatch(b *pebble.Batch, bucket, topicHash uint64, value []byte) ([]byte, error) {
 	nextID := atomic.AddUint64(&er.lastID, 1)
 
-	key := eventKey(bucket, nextID)
+	key := utils.EventKey(bucket, topicHash, nextID)
+
 	idBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(idBytes, nextID)
+	if err := b.Set(eventsLastIDKey, idBytes, nil); err != nil {
+		return nil, err
+	}
 
-	// incr last id
-	_ = b.Set(eventsLastIDKey, idBytes, nil)
-	// store event
-	_ = b.Set(key, data, nil)
+	if err := b.Set(key, value, nil); err != nil {
+		return nil, err
+	}
 
-	return nil
+	return key, nil
 }
 
-func eventKey(bucket uint64, eventID uint64) []byte {
-	key := make([]byte, 16)
-	binary.BigEndian.PutUint64(key, bucket)
-	binary.BigEndian.PutUint64(key[8:], eventID)
-	return key
+func (er *EventRepository) DeleteWithBatch(b *pebble.Batch, key []byte) error {
+	return b.Delete(key, nil)
 }

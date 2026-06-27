@@ -9,42 +9,156 @@ import (
 type CommandType uint8
 
 const (
-	StoreEventCmd CommandType = iota
+	// StoreBatchCmd atomically writes a batch of messages to Pebble.
+	// The state machine uses the shared EventRepository to assign keys,
+	// ensuring consistent monotonic IDs across both Raft and standalone modes.
+	StoreBatchCmd CommandType = iota
+
+	// DeleteBatchCmd atomically deletes a batch of message keys from Pebble.
+	// Used for Raft-replicated ACK-driven deletions and TTL expirations.
+	DeleteBatchCmd
 )
 
-// Command is the unit of work proposed to the Raft cluster.
-//
-// Wire format (9+ bytes, zero allocations on marshal):
-//
-//	[0]    : CommandType (1 byte)
-//	[1..8] : Bucket     (8 bytes, big-endian uint64)
-//	[9..]  : Data       (variable length, verbatim copy)
-type Command struct {
-	Type   CommandType
+// StoreBatchItem is the minimal per-message metadata carried in a StoreBatchCmd.
+// The serialised StoredMessage value is passed verbatim — no re-serialisation
+// occurs in the state machine. The state machine calls EventRepository to assign
+// the monotonic event ID and construct the full 24-byte key.
+type StoreBatchItem struct {
+	// Bucket is the pre-computed time bucket (fire_at_ms / timeBucketSize).
 	Bucket uint64
-	Data   []byte
+	// TopicHash is xxhash64(topic).
+	TopicHash uint64
+	// Value is the already-serialised storagepb.StoredMessage proto bytes.
+	// This slice aliases the original command buffer — do not mutate.
+	Value []byte
 }
 
-// MarshalCommand serialises cmd into a compact binary representation.
-// The resulting slice is safe to pass to Dragonboat's SyncPropose.
-func MarshalCommand(cmd *Command) ([]byte, error) {
-	out := make([]byte, 1+8+len(cmd.Data))
-	out[0] = byte(cmd.Type)
-	binary.BigEndian.PutUint64(out[1:9], cmd.Bucket)
-	copy(out[9:], cmd.Data)
+// MarshalStoreBatchCmd serialises a list of items into a compact binary command.
+//
+// Wire format:
+//
+//	[0]      CommandType   (1 byte = 0)
+//	[1..8]   count         (uint64 big-endian)
+//	for each item:
+//	  [n..n+7]   bucket     (uint64 big-endian)
+//	  [n+8..n+15] topicHash (uint64 big-endian)
+//	  [n+16..n+19] valLen   (uint32 big-endian)
+//	  [n+20..]   value      (valLen bytes — serialised StoredMessage)
+//
+// The Value slices in items are appended directly with a single copy — there is
+// no intermediate StoreBatchEntry or double-copy on the write hot path.
+func MarshalStoreBatchCmd(items []StoreBatchItem) ([]byte, error) {
+	// Pre-calculate total size to do a single allocation.
+	size := 1 + 8 // cmdType + count
+	for _, it := range items {
+		size += 8 + 8 + 4 + len(it.Value) // bucket + topicHash + valLen + value
+	}
+
+	out := make([]byte, size)
+	out[0] = byte(StoreBatchCmd)
+	binary.BigEndian.PutUint64(out[1:9], uint64(len(items)))
+
+	pos := 9
+	for _, it := range items {
+		binary.BigEndian.PutUint64(out[pos:pos+8], it.Bucket)
+		pos += 8
+		binary.BigEndian.PutUint64(out[pos:pos+8], it.TopicHash)
+		pos += 8
+		binary.BigEndian.PutUint32(out[pos:pos+4], uint32(len(it.Value)))
+		pos += 4
+		copy(out[pos:], it.Value)
+		pos += len(it.Value)
+	}
+
 	return out, nil
 }
 
-// UnmarshalCommand deserialises a command previously encoded by MarshalCommand.
-// The returned Data slice aliases the input slice — do not mutate data after
-// calling this function if you intend to keep the Command alive.
-func UnmarshalCommand(data []byte) (*Command, error) {
-	if len(data) < 9 {
-		return nil, fmt.Errorf("raft: command payload too short: got %d bytes, need at least 9", len(data))
+// UnmarshalStoreBatchCmd deserialises a StoreBatchCmd payload.
+// The Value slices in the returned items alias the input data slice — they are
+// zero-copy views into the Dragonboat log buffer. Callers must not mutate them.
+func UnmarshalStoreBatchCmd(data []byte) ([]StoreBatchItem, error) {
+	if len(data) < 1+8 {
+		return nil, fmt.Errorf("raft: StoreBatchCmd too short: %d bytes", len(data))
 	}
-	return &Command{
-		Type:   CommandType(data[0]),
-		Bucket: binary.BigEndian.Uint64(data[1:9]),
-		Data:   data[9:],
-	}, nil
+	if CommandType(data[0]) != StoreBatchCmd {
+		return nil, fmt.Errorf("raft: expected StoreBatchCmd (0), got %d", data[0])
+	}
+
+	count := binary.BigEndian.Uint64(data[1:9])
+	items := make([]StoreBatchItem, 0, count)
+
+	pos := 9
+	for i := uint64(0); i < count; i++ {
+		if pos+8+8+4 > len(data) {
+			return nil, fmt.Errorf("raft: StoreBatchCmd truncated at item %d header", i)
+		}
+		bucket := binary.BigEndian.Uint64(data[pos : pos+8])
+		pos += 8
+		topicHash := binary.BigEndian.Uint64(data[pos : pos+8])
+		pos += 8
+		valLen := int(binary.BigEndian.Uint32(data[pos : pos+4]))
+		pos += 4
+
+		if pos+valLen > len(data) {
+			return nil, fmt.Errorf("raft: StoreBatchCmd truncated at item %d value (need %d, have %d)", i, valLen, len(data)-pos)
+		}
+		// Zero-copy: alias the command buffer directly.
+		value := data[pos : pos+valLen]
+		pos += valLen
+
+		items = append(items, StoreBatchItem{
+			Bucket:    bucket,
+			TopicHash: topicHash,
+			Value:     value,
+		})
+	}
+
+	return items, nil
+}
+
+// MarshalDeleteBatchCmd serialises a list of 24-byte Pebble keys to delete.
+//
+// Wire format:
+//
+//	[0]      CommandType  (1 byte = 1)
+//	[1..8]   count        (uint64 big-endian)
+//	for each key:
+//	  [n..n+23] key       (24 bytes — fixed size)
+func MarshalDeleteBatchCmd(keys [][]byte) ([]byte, error) {
+	out := make([]byte, 1+8+len(keys)*24)
+	out[0] = byte(DeleteBatchCmd)
+	binary.BigEndian.PutUint64(out[1:9], uint64(len(keys)))
+
+	pos := 9
+	for _, k := range keys {
+		if len(k) != 24 {
+			return nil, fmt.Errorf("raft: DeleteBatchCmd: key must be 24 bytes, got %d", len(k))
+		}
+		copy(out[pos:pos+24], k)
+		pos += 24
+	}
+
+	return out, nil
+}
+
+// UnmarshalDeleteBatchCmd deserialises a DeleteBatchCmd payload.
+// The returned key slices alias the input data — do not mutate data.
+func UnmarshalDeleteBatchCmd(data []byte) ([][]byte, error) {
+	if len(data) < 1+8 {
+		return nil, fmt.Errorf("raft: DeleteBatchCmd too short: %d bytes", len(data))
+	}
+	if CommandType(data[0]) != DeleteBatchCmd {
+		return nil, fmt.Errorf("raft: expected DeleteBatchCmd (1), got %d", data[0])
+	}
+	count := int(binary.BigEndian.Uint64(data[1:9]))
+	if len(data) < 9+count*24 {
+		return nil, fmt.Errorf("raft: DeleteBatchCmd too short for %d keys", count)
+	}
+
+	keys := make([][]byte, count)
+	for i := 0; i < count; i++ {
+		start := 9 + i*24
+		keys[i] = data[start : start+24]
+	}
+	return keys, nil
 }
