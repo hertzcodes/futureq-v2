@@ -5,14 +5,16 @@ import (
 	"net"
 	"time"
 
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
+
 	"github.com/futureq-io/futureq/internal/api/grpc/handlers"
 	"github.com/futureq-io/futureq/internal/app"
 	"github.com/futureq-io/futureq/internal/config"
 	"github.com/futureq-io/futureq/internal/dispatcher"
+	"github.com/futureq-io/futureq/internal/membership"
 	pb "github.com/futureq-io/protocol/proto/go"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
 )
 
 // Server wraps a *grpc.Server and exposes lifecycle methods.
@@ -24,23 +26,25 @@ type Server struct {
 
 // New creates a fully configured gRPC server and registers all service
 // handlers. No network socket is opened yet; call Listen to do that.
-func New(cfg config.Server, hub *dispatcher.Hub, deleter *dispatcher.Deleter, logger *zap.Logger) *Server {
+func New(
+	cfg config.Server,
+	hub *dispatcher.Hub,
+	deleter *dispatcher.Deleter,
+	gossip *membership.Manager,
+	logger *zap.Logger,
+) *Server {
 	log := logger.Named("grpc_server")
 
 	srv := grpc.NewServer(
-		// Honour the operator-supplied connection ceiling for the whole server.
 		grpc.MaxConcurrentStreams(cfg.MaxConns),
-
 		grpc.MaxRecvMsgSize(cfg.MaxRecvSizeKB*1024), // KB
 		grpc.MaxSendMsgSize(cfg.MaxSendSizeKB*1024), // KB
 
-		// Keepalive enforcement: drop clients that ignore pings.
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			MinTime:             5 * time.Second,
 			PermitWithoutStream: true,
 		}),
 
-		// Keepalive server-side parameters.
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			MaxConnectionIdle:     30 * time.Second,
 			MaxConnectionAge:      2 * time.Minute,
@@ -50,9 +54,10 @@ func New(cfg config.Server, hub *dispatcher.Hub, deleter *dispatcher.Deleter, lo
 		}),
 	)
 
-	// Register service implementations.
+	// Register all service implementations.
 	pb.RegisterFutureQProducerServer(srv, handlers.NewProducerHandler(log))
 	pb.RegisterFutureQConsumerServer(srv, handlers.NewConsumerHandler(log, hub, deleter))
+	pb.RegisterFutureQClusterServer(srv, handlers.NewClusterHandler(log, gossip))
 
 	return &Server{
 		srv:    srv,
@@ -80,9 +85,9 @@ func (s *Server) Listen() *Server {
 	return s
 }
 
-// WaitForShutdown registers a background shutdown handler that runs when ctx (the global app.Ctx)
-// is cancelled. When triggered, it gracefully stops the gRPC server within the deadline
-// carried by app.A.ShutCtx (or a 10s fallback).
+// WaitForShutdown registers a background shutdown handler that runs when ctx
+// (the global app.Ctx) is cancelled. It gracefully stops the gRPC server
+// within the deadline carried by app.A.ShutCtx (or a 10s fallback).
 func (s *Server) WaitForShutdown(ctx context.Context) {
 	app.A.RegisterComponentWithShutdown()
 
