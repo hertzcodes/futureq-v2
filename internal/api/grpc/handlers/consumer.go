@@ -75,13 +75,13 @@ func (h *ConsumerHandler) Subscribe(stream grpc.BidiStreamingServer[pb.ConsumerF
 		leaderID, _, valid, errL := app.A.NodeHost.GetLeaderID(shardID)
 		isLeader := errL == nil && valid && leaderID == app.A.Config().Raft.NodeID
 
-		if !isLeader && !init.ReadFromReplica {
-			h.logger.Warn("rejecting consumer: not the leader and read_from_replica=false",
+		if !isLeader {
+			h.logger.Warn("rejecting consumer: not the leader",
 				zap.String("topic", init.Topic),
 				zap.String("group_id", init.GroupId),
 			)
 			return status.Errorf(codes.FailedPrecondition,
-				"node is not the cluster leader; set read_from_replica=true to read from a follower (experimental)")
+				"node is not the cluster leader")
 		}
 	}
 

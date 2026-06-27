@@ -5,7 +5,7 @@ go 1.26.2
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/cockroachdb/pebble/v2 v2.1.6
-	github.com/futureq-io/protocol/proto/go v0.1.5
+	github.com/futureq-io/protocol/proto/go v0.1.6
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/memberlist v0.3.1
 	github.com/lni/dragonboat/v4 v4.0.0-20250723143628-076c7f6497dc
