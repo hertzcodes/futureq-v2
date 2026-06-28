@@ -1,6 +1,7 @@
 package dispatcher
 
 import (
+	"bytes"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -40,9 +41,9 @@ type Hub struct {
 	// byID: consumerID → *consumerEntry (fast lookup for unregister)
 	byID map[string]*consumerEntry
 
-	// inFlightByConsumer: consumerID → []keyString (keys in-flight to that consumer)
+	// inFlightByConsumer: consumerID → [][]Byte (slice of keys) (keys in-flight to that consumer)
 	// Protected by inFlightMu; used for bulk cleanup on disconnect.
-	inFlightByConsumer map[string][]string
+	inFlightByConsumer map[string][][]byte
 	inFlightMu         sync.Mutex
 
 	logger *zap.Logger
@@ -55,7 +56,7 @@ func NewHub(logger *zap.Logger, wakeCh chan struct{}) *Hub {
 	return &Hub{
 		groups:             make(map[string]map[string][]*consumerEntry),
 		byID:               make(map[string]*consumerEntry),
-		inFlightByConsumer: make(map[string][]string),
+		inFlightByConsumer: make(map[string][][]byte),
 		logger:             logger.Named("hub"),
 		wakeCh:             wakeCh,
 	}
@@ -63,7 +64,7 @@ func NewHub(logger *zap.Logger, wakeCh chan struct{}) *Hub {
 
 // Register adds a consumer to the Hub under the given topic and group.
 func (h *Hub) Register(id, topic, groupID string, ch chan *pb.QueueMessage) {
-	e := &consumerEntry{
+	entry := &consumerEntry{
 		id:    id,
 		topic: topic,
 		group: groupID,
@@ -74,8 +75,9 @@ func (h *Hub) Register(id, topic, groupID string, ch chan *pb.QueueMessage) {
 	if h.groups[topic] == nil {
 		h.groups[topic] = make(map[string][]*consumerEntry)
 	}
-	h.groups[topic][groupID] = append(h.groups[topic][groupID], e)
-	h.byID[id] = e
+
+	h.groups[topic][groupID] = append(h.groups[topic][groupID], entry)
+	h.byID[id] = entry
 	h.mu.Unlock()
 
 	h.logger.Info("consumer registered",
@@ -91,18 +93,17 @@ func (h *Hub) Register(id, topic, groupID string, ch chan *pb.QueueMessage) {
 	}
 }
 
-// Unregister removes a consumer from the Hub and returns the set of in-flight
-// key strings that were associated with it (so the dispatcher can remove them
-// from the in-flight map and re-dispatch those messages).
-func (h *Hub) Unregister(id string) []string {
+// Unregister removes a consumer from the Hub and deletes the in-flight messages related to it.
+func (h *Hub) Unregister(id string) {
 	h.mu.Lock()
 	e, ok := h.byID[id]
 	if !ok {
 		h.mu.Unlock()
-		return nil
+		return
 	}
 
 	// Remove from group list.
+	// TODO: we could have a set for consumers in the group for O(1) deletions
 	group := h.groups[e.topic][e.group]
 	for i, ce := range group {
 		if ce.id == id {
@@ -110,6 +111,7 @@ func (h *Hub) Unregister(id string) []string {
 			break
 		}
 	}
+
 	// Clean up empty maps.
 	if len(h.groups[e.topic][e.group]) == 0 {
 		delete(h.groups[e.topic], e.group)
@@ -126,19 +128,16 @@ func (h *Hub) Unregister(id string) []string {
 		zap.String("group", e.group),
 	)
 
-	// Return in-flight keys for this consumer.
+	// Delete in-flight keys for this consumer.
 	h.inFlightMu.Lock()
-	keys := h.inFlightByConsumer[id]
 	delete(h.inFlightByConsumer, id)
 	h.inFlightMu.Unlock()
-
-	return keys
 }
 
 // DispatchToGroup sends msg to exactly one available consumer in (topic, groupID).
 // It uses round-robin selection among the group's consumers and skips full channels.
 // Returns the consumerID that received the message, or "" if no consumer was available.
-func (h *Hub) DispatchToGroup(topic, groupID string, msg *pb.QueueMessage, keyStr string) string {
+func (h *Hub) DispatchToGroup(topic, groupID string, msg *pb.QueueMessage, deliveryTag []byte) string {
 	h.mu.RLock()
 	groups, ok := h.groups[topic]
 	if !ok {
@@ -171,7 +170,7 @@ func (h *Hub) DispatchToGroup(topic, groupID string, msg *pb.QueueMessage, keySt
 			h.rrIndex.Store(rrKey, (idx+i+1)%n)
 			// Track in-flight key for this consumer.
 			h.inFlightMu.Lock()
-			h.inFlightByConsumer[candidate.id] = append(h.inFlightByConsumer[candidate.id], keyStr)
+			h.inFlightByConsumer[candidate.id] = append(h.inFlightByConsumer[candidate.id], deliveryTag)
 			h.inFlightMu.Unlock()
 			return candidate.id
 		default:
@@ -188,12 +187,13 @@ func (h *Hub) DispatchToGroup(topic, groupID string, msg *pb.QueueMessage, keySt
 
 // RemoveInFlightForConsumer removes a specific key from a consumer's in-flight
 // tracking. Called when the consumer ACKs or NACKs a message.
-func (h *Hub) RemoveInFlightForConsumer(consumerID, keyStr string) {
+func (h *Hub) RemoveInFlightForConsumer(consumerID string, key []byte) {
+
 	h.inFlightMu.Lock()
 	defer h.inFlightMu.Unlock()
 	keys := h.inFlightByConsumer[consumerID]
 	for i, k := range keys {
-		if k == keyStr {
+		if bytes.Equal(k, key) {
 			h.inFlightByConsumer[consumerID] = append(keys[:i], keys[i+1:]...)
 			return
 		}

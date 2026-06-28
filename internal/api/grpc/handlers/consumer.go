@@ -65,11 +65,13 @@ func (h *ConsumerHandler) Subscribe(stream grpc.BidiStreamingServer[pb.ConsumerF
 	if init.Topic == "" {
 		return status.Errorf(codes.InvalidArgument, "SubscribeInit.topic must not be empty")
 	}
+
+	// TODO: allow empty consumer groups (fan out for these kinds of consumers)
+	// Maybe put them in a special group where they all get fan-out instead of compete.
 	if init.GroupId == "" {
 		return status.Errorf(codes.InvalidArgument, "SubscribeInit.group_id must not be empty")
 	}
 
-	// ─── Leader check (followers can serve reads if read_from_replica is set) ─
 	if app.A.NodeHost != nil {
 		shardID := app.A.Config().Raft.ClusterID
 		leaderID, _, valid, errL := app.A.NodeHost.GetLeaderID(shardID)
@@ -93,12 +95,7 @@ func (h *ConsumerHandler) Subscribe(stream grpc.BidiStreamingServer[pb.ConsumerF
 	metrics.ActiveConsumers.WithLabelValues(init.Topic, init.GroupId).Inc()
 	defer func() {
 		// Unregister and reclaim in-flight keys so they can be re-dispatched.
-		inFlightKeys := h.hub.Unregister(consumerID)
-		for _, keyStr := range inFlightKeys {
-			// The deleter.RemoveInFlight is on the Dispatcher; we signal via
-			// a small callback set in start.go.
-			_ = keyStr
-		}
+		h.hub.Unregister(consumerID)
 		metrics.ActiveConsumers.WithLabelValues(init.Topic, init.GroupId).Dec()
 		h.logger.Info("consumer disconnected",
 			zap.String("id", consumerID),
@@ -155,25 +152,18 @@ func (h *ConsumerHandler) Subscribe(stream grpc.BidiStreamingServer[pb.ConsumerF
 				continue
 			}
 
-			keyStr := string(ackReq.DeliveryTag)
 			success := ackReq.Success
 
 			metrics.ConsumerAckTotal.WithLabelValues(
 				init.Topic, init.GroupId, boolToStr(success),
 			).Inc()
 
+			h.hub.RemoveInFlightForConsumer(consumerID, ackReq.DeliveryTag)
 			if success {
 				// ACK: queue the key for Raft-replicated deletion.
 				h.deleter.MarkDeleted(ackReq.DeliveryTag)
-				h.hub.RemoveInFlightForConsumer(consumerID, keyStr)
 				metrics.MessagesInFlight.WithLabelValues(init.Topic, init.GroupId).Dec()
 			} else {
-				// NACK: immediately remove from in-flight so the dispatcher
-				// can re-dispatch on the next tick.
-				//
-				// We signal the dispatcher's inFlight map via the OnNack callback
-				// set in start.go (or directly here if accessible).
-				h.hub.RemoveInFlightForConsumer(consumerID, keyStr)
 				// The key remains in Pebble; the dispatcher will re-deliver it.
 				metrics.MessagesInFlight.WithLabelValues(init.Topic, init.GroupId).Dec()
 			}

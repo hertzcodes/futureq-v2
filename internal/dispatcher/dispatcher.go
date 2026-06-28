@@ -67,7 +67,7 @@ func NewDispatcher(
 // RemoveInFlight removes a message from the in-flight tracker by key, making
 // it eligible for re-dispatch if it still exists in Pebble.
 func (d *Dispatcher) RemoveInFlight(key []byte) {
-	d.inFlight.Delete(string(key))
+	d.inFlight.Delete(key)
 }
 
 // RemoveInFlightBatch removes multiple keys from the in-flight tracker.
@@ -75,7 +75,7 @@ func (d *Dispatcher) RemoveInFlight(key []byte) {
 // DeleteBatchCmd — at that point the keys are gone from all replicas.
 func (d *Dispatcher) RemoveInFlightBatch(keys [][]byte) {
 	for _, k := range keys {
-		d.inFlight.Delete(string(k))
+		d.inFlight.Delete(k)
 	}
 }
 
@@ -179,16 +179,14 @@ func (d *Dispatcher) doPass() int {
 			continue
 		}
 
-		keyStr := string(key)
-
 		// Check in-flight status.
-		if entry, exists := d.inFlight.Load(keyStr); exists {
+		if entry, exists := d.inFlight.Load(key); exists {
 			e := entry.(*inFlightEntry)
 			if time.Since(e.dispatchedAt) < d.inFlightTimeout {
 				continue
 			}
 			// Timed out — allow re-dispatch.
-			d.inFlight.Delete(keyStr)
+			d.inFlight.Delete(key)
 		}
 
 		// Deserialize the stored message.
@@ -228,7 +226,7 @@ func (d *Dispatcher) doPass() int {
 				DelayMs:          msg.DelayMs,
 			}
 
-			consumerID := d.hub.DispatchToGroup(at.Topic, at.GroupID, qMsg, keyStr)
+			consumerID := d.hub.DispatchToGroup(at.Topic, at.GroupID, qMsg, key)
 			if consumerID == "" {
 				// No available consumer in this group right now.
 				continue
@@ -237,7 +235,7 @@ func (d *Dispatcher) doPass() int {
 			sentAny = true
 
 			// Record in-flight.
-			d.inFlight.Store(keyStr, &inFlightEntry{
+			d.inFlight.Store(key, &inFlightEntry{
 				dispatchedAt: time.Now(),
 				consumerID:   consumerID,
 				topic:        at.Topic,
